@@ -1,0 +1,25 @@
+{
+  "name": "tecnofix",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 127.0.0.1",
+    "build": "vite build",
+    "start": "node src/server.js",
+    "test": "node --test tests/*.test.js",
+    "dev:api": "node --watch src/server.js",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "react": "19.2.8",
+    "react-dom": "19.2.8",
+    "react-router": "8.5.1",
+    "zustand": "5.1.0"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "5.2.0",
+    "prettier": "3.6.2",
+    "vite": "7.3.8"
+  }
+}
