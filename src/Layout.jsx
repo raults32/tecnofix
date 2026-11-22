@@ -13,6 +13,9 @@ export default function Layout() {
   const cerrarSesion = useTecnoFixStore((state) => state.cerrarSesion);
   const manejarError = useTecnoFixStore((state) => state.manejarError);
   const limpiarAviso = useTecnoFixStore((state) => state.limpiarAviso);
+  const enviando = useTecnoFixStore((state) => state.enviando);
+  const datosDesactualizados = useTecnoFixStore((state) => state.datosDesactualizados);
+  const actualizarDatos = useTecnoFixStore((state) => state.actualizarDatos);
   const navegar = useNavigate();
   const ubicacion = useLocation();
   const { id } = useParams();
@@ -114,6 +117,14 @@ export default function Layout() {
         </header>
 
         <div className="contenido">
+          {datosDesactualizados && (
+            <div className="aviso" role="status">
+              <p>Actualiza los datos antes de registrar otro cambio.</p>
+              <button type="button" onClick={actualizarDatos} disabled={enviando}>
+                {enviando ? 'Actualizando…' : 'Actualizar datos'}
+              </button>
+            </div>
+          )}
           {mensaje && (
             <p role={esError ? 'alert' : 'status'} className={`aviso ${esError ? 'error' : ''}`}>
               {mensaje}

@@ -5,7 +5,9 @@
 // Fecha: 9 de noviembre de 2026
 
 /* Importaciones de presentación y captura. */
-import React, { useState } from 'react';
+import React, { useRef, useState } from 'react';
+import { useTecnoFixStore } from '../store/tecnofix.js';
+import { guardarEnSesion, leerEnSesion } from '../utils/almacenSesion.js';
 import { capturarFormulario, MONEDA, obtenerEstado } from '../utils/vistaUtils.js';
 
 /* Pruebas típicas de la revisión de hardware. */
@@ -19,17 +21,34 @@ const PRUEBAS = [
 ];
 
 /** Separa diagnóstico, piezas, cotización y reparación según el prototipo técnico. */
-function Tecnico({ orden, seccion, manejarOperacion, manejarNavegar }) {
+function Tecnico({ orden, usuario, seccion, manejarOperacion, manejarNavegar }) {
   /* Edición local de partidas; solo se persiste al guardar. */
-  const [piezas, setPiezas] = useState(orden.piezas || []);
-  const [manoObra, setManoObra] = useState(orden.manoObra || 0);
-  const [pruebas, setPruebas] = useState(orden.pruebas || {});
-  const [esEditorVisible, setEsEditorVisible] = useState(false);
-  const costoRefacciones = piezas.reduce((total, pieza) => total + pieza.cantidad * pieza.costo, 0);
+  const claveBorrador = `tecnofix:borrador:${usuario.id}:${orden.id}:${seccion}`;
+  const [borrador] = useState(() => leerEnSesion(claveBorrador) || {});
+  const [piezas, setPiezas] = useState(borrador.piezas ?? orden.piezas ?? []);
+  const [manoObra, setManoObra] = useState(borrador.manoObra ?? orden.manoObra ?? 0);
+  const [pruebas, setPruebas] = useState(borrador.pruebas ?? orden.pruebas ?? {});
+  const [esEditorVisible, setEsEditorVisible] = useState(Boolean(borrador.partida));
+  const partida = esEditorVisible ? leerEnSesion(claveBorrador)?.partida : null;
+  const bloqueado = useTecnoFixStore((state) => state.enviando || state.datosDesactualizados);
+  const campoManoObra = useRef(null);
+  const costoRefacciones =
+    piezas.reduce((total, pieza) => total + pieza.cantidad * Math.round(pieza.costo * 100), 0) /
+    100;
   const esCerrada = ['LISTO', 'ENTREGADO', 'CANCELADO'].includes(orden.estado);
+  const guardarBorrador = (cambios) => {
+    guardarEnSesion(claveBorrador, { ...leerEnSesion(claveBorrador), ...cambios });
+  };
+  const guardarCamposBorrador = (evento) => {
+    guardarBorrador(Object.fromEntries(new FormData(evento.currentTarget)));
+  };
+  const cambiarPiezas = (partidas) => {
+    setPiezas(partidas);
+    guardarBorrador({ piezas: partidas });
+  };
   const manejarAgregar = (evento) => {
     const valores = capturarFormulario(evento);
-    setPiezas([
+    cambiarPiezas([
       ...piezas,
       {
         nombre: valores.nombre,
@@ -38,10 +57,13 @@ function Tecnico({ orden, seccion, manejarOperacion, manejarNavegar }) {
         disponibilidad: valores.disponibilidad,
       },
     ]);
+    guardarBorrador({ partida: null });
     setEsEditorVisible(false);
   };
   const manejarGuardarPiezas = async () => {
+    if (!campoManoObra.current.reportValidity()) return;
     if (await manejarOperacion(`ordenes/${orden.id}`, { accion: 'piezas', piezas, manoObra })) {
+      guardarEnSesion(claveBorrador, null);
       manejarNavegar('cotizacion');
     }
   };
@@ -57,18 +79,22 @@ function Tecnico({ orden, seccion, manejarOperacion, manejarNavegar }) {
         refacciones: orden.refacciones || '',
       })
     ) {
+      guardarEnSesion(claveBorrador, null);
       manejarNavegar('piezas');
     }
   };
-  const manejarReparacion = (evento) => {
+  const manejarReparacion = async (evento) => {
     const valores = capturarFormulario(evento);
-    manejarOperacion(`ordenes/${orden.id}`, {
-      accion: 'reparacion',
-      ...valores,
-      manoObra: String(orden.manoObra || 0),
-      costoRefacciones: String(orden.costoRefacciones || 0),
-      refacciones: orden.refacciones || '',
-    });
+    if (
+      await manejarOperacion(`ordenes/${orden.id}`, {
+        accion: 'reparacion',
+        ...valores,
+        manoObra: String(orden.manoObra || 0),
+        costoRefacciones: String(orden.costoRefacciones || 0),
+        refacciones: orden.refacciones || '',
+      })
+    )
+      guardarEnSesion(claveBorrador, null);
   };
 
   return seccion === 'diagnostico' ? (
@@ -100,7 +126,7 @@ function Tecnico({ orden, seccion, manejarOperacion, manejarNavegar }) {
           </button>
         )}
       </article>
-      <form onSubmit={manejarDiagnostico}>
+      <form onSubmit={manejarDiagnostico} onChange={guardarCamposBorrador}>
         <h2>Checklist de pruebas</h2>
         {PRUEBAS.map((nombre) => (
           <div className="fila-prueba" key={nombre}>
@@ -116,7 +142,11 @@ function Tecnico({ orden, seccion, manejarOperacion, manejarNavegar }) {
                       : 'prueba-falla'
                     : ''
                 }`}
-                onClick={() => setPruebas({ ...pruebas, [nombre]: resultado })}
+                onClick={() => {
+                  const nuevasPruebas = { ...pruebas, [nombre]: resultado };
+                  setPruebas(nuevasPruebas);
+                  guardarBorrador({ pruebas: nuevasPruebas });
+                }}
               >
                 {resultado}
               </button>
@@ -128,12 +158,13 @@ function Tecnico({ orden, seccion, manejarOperacion, manejarNavegar }) {
           <textarea
             name="descripcion"
             minLength="20"
+            maxLength={1000}
             required
-            defaultValue={orden.diagnostico || ''}
+            defaultValue={borrador.descripcion ?? orden.diagnostico ?? ''}
             placeholder="Describe las fallas y pruebas realizadas…"
           />
         </label>
-        <button disabled={orden.estado !== 'EN_DIAGNOSTICO'}>
+        <button disabled={bloqueado || orden.estado !== 'EN_DIAGNOSTICO'}>
           Guardar diagnóstico y agregar piezas
         </button>
       </form>
@@ -143,29 +174,50 @@ function Tecnico({ orden, seccion, manejarOperacion, manejarNavegar }) {
       <div className="herramientas">
         <p>Agrega las piezas propuestas para esta reparación.</p>
         <button
-          disabled={orden.estado !== 'EN_DIAGNOSTICO'}
+          disabled={orden.estado !== 'EN_DIAGNOSTICO' || piezas.length >= 50}
           onClick={() => setEsEditorVisible(!esEditorVisible)}
         >
           + Agregar pieza
         </button>
       </div>
       {esEditorVisible && (
-        <form className="formulario-partida" onSubmit={manejarAgregar}>
+        <form
+          className="formulario-partida"
+          onSubmit={manejarAgregar}
+          onChange={(evento) =>
+            guardarBorrador({ partida: Object.fromEntries(new FormData(evento.currentTarget)) })
+          }
+        >
           <label>
             Pieza
-            <input name="nombre" required maxLength="100" />
+            <input name="nombre" required maxLength="100" defaultValue={partida?.nombre} />
           </label>
           <label>
             Cantidad
-            <input name="cantidad" type="number" min="1" step="1" required />
+            <input
+              name="cantidad"
+              type="number"
+              min="1"
+              max="10000"
+              step="1"
+              defaultValue={partida?.cantidad}
+              required
+            />
           </label>
           <label>
             Costo unitario
-            <input name="costo" type="number" min="0" step="0.01" required />
+            <input
+              name="costo"
+              type="number"
+              min="0"
+              step="0.01"
+              defaultValue={partida?.costo}
+              required
+            />
           </label>
           <label>
             Disponibilidad
-            <select name="disponibilidad">
+            <select name="disponibilidad" defaultValue={partida?.disponibilidad || 'En stock'}>
               <option>En stock</option>
               <option>Por pedir</option>
             </select>
@@ -200,7 +252,7 @@ function Tecnico({ orden, seccion, manejarOperacion, manejarNavegar }) {
                     className="secundario peligro"
                     disabled={orden.estado !== 'EN_DIAGNOSTICO'}
                     onClick={() =>
-                      setPiezas(piezas.filter((elemento, posicion) => posicion !== indice))
+                      cambiarPiezas(piezas.filter((elemento, posicion) => posicion !== indice))
                     }
                   >
                     Quitar
@@ -225,19 +277,26 @@ function Tecnico({ orden, seccion, manejarOperacion, manejarNavegar }) {
           <label>
             Mano de obra
             <input
+              ref={campoManoObra}
               aria-label="Mano de obra"
               type="number"
               min="0"
               step="0.01"
+              required
               value={manoObra}
-              onChange={(evento) => setManoObra(evento.target.value)}
+              onChange={(evento) => {
+                setManoObra(evento.target.value);
+                guardarBorrador({ manoObra: evento.target.value });
+              }}
             />
           </label>
           <div className="total">
             Total estimado<strong>{MONEDA.format(costoRefacciones + Number(manoObra || 0))}</strong>
           </div>
           <button
-            disabled={orden.estado !== 'EN_DIAGNOSTICO' || !orden.esDiagnosticoConcluido}
+            disabled={
+              bloqueado || orden.estado !== 'EN_DIAGNOSTICO' || !orden.esDiagnosticoConcluido
+            }
             onClick={manejarGuardarPiezas}
           >
             Generar cotización
@@ -315,11 +374,16 @@ function Tecnico({ orden, seccion, manejarOperacion, manejarNavegar }) {
     </section>
   ) : (
     <section className="columnas">
-      <form onSubmit={manejarReparacion}>
+      <form onSubmit={manejarReparacion} onChange={guardarCamposBorrador}>
         <h2>Registro de reparación (UC06)</h2>
         <label>
           Trabajo realizado
-          <textarea name="descripcion" required defaultValue={orden.reparacion || ''} />
+          <textarea
+            name="descripcion"
+            required
+            maxLength={1000}
+            defaultValue={borrador.descripcion ?? orden.reparacion ?? ''}
+          />
         </label>
         <h3>Piezas instaladas</h3>
         {(orden.piezas || []).map((pieza, indice) => (
@@ -327,7 +391,12 @@ function Tecnico({ orden, seccion, manejarOperacion, manejarNavegar }) {
         ))}
         <label>
           Pruebas finales
-          <textarea name="pruebasFinales" required defaultValue={orden.pruebasFinales || ''} />
+          <textarea
+            name="pruebasFinales"
+            required
+            maxLength={1000}
+            defaultValue={borrador.pruebasFinales ?? orden.pruebasFinales ?? ''}
+          />
         </label>
         <label>
           Tiempo invertido (minutos)
@@ -337,10 +406,10 @@ function Tecnico({ orden, seccion, manejarOperacion, manejarNavegar }) {
             min="1"
             step="1"
             required
-            defaultValue={orden.minutosTrabajo || ''}
+            defaultValue={borrador.minutosTrabajo ?? orden.minutosTrabajo ?? ''}
           />
         </label>
-        <button disabled={orden.estado !== 'EN_REPARACION'}>Guardar reparación</button>
+        <button disabled={bloqueado || orden.estado !== 'EN_REPARACION'}>Guardar reparación</button>
       </form>
       <article>
         <h2>Estado de la orden (UC07)</h2>

@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { exigir, requerir } from './validaciones.js';
+import { exigir, requerir } from '../validaciones.js';
 
 export function registrarCliente(base, datos, esRecepcion) {
   exigir(esRecepcion, 'Solo Recepción o Administración registra clientes.');
@@ -33,5 +33,6 @@ export function registrarEquipo(base, datos, esRecepcion) {
     !base.equipos.some((equipo) => equipo.serie.toLowerCase() === datos.serie.toLowerCase()),
     'Número de serie duplicado.',
   );
-  base.equipos.push({ id: randomUUID(), ...datos });
+  const { idCliente, marca, modelo, serie, especificaciones } = datos;
+  base.equipos.push({ id: randomUUID(), idCliente, marca, modelo, serie, especificaciones });
 }

@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
-import { derivarContrasena } from './sesion.js';
-import { exigir, requerir } from './validaciones.js';
+import { derivarContrasena } from '../sesion.js';
+import { exigir, requerir } from '../validaciones.js';
 
 export function listarUsuarios(base, esAdministrador) {
   exigir(esAdministrador, 'Solo Administración puede gestionar usuarios.');

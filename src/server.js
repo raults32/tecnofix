@@ -9,21 +9,45 @@ import http from 'node:http';
 import { readFileSync } from 'node:fs';
 import { resolve, extname } from 'node:path';
 import { guardar, inicializarBase, leerBase } from './backend/base.js';
-import { actualizarOrden, buscarOrdenDisponible, crearOrden } from './backend/ordenes.js';
-import { registrarCliente, registrarEquipo } from './backend/recepcion.js';
-import { crearReportePdf, generarReporte } from './backend/reportes.js';
+import { crearCotizacionPdf } from './backend/documentos/pdf.js';
+import { crearReportePdf, generarReporte } from './backend/documentos/reportes.js';
+import {
+  actualizarOrden,
+  buscarOrdenDisponible,
+  crearOrden,
+} from './backend/operaciones/ordenes.js';
+import { registrarCliente, registrarEquipo } from './backend/operaciones/recepcion.js';
+import { actualizarUsuario, crearUsuario, listarUsuarios } from './backend/operaciones/usuarios.js';
 import { cerrarSesion, iniciarSesion, obtenerUsuario } from './backend/sesion.js';
-import { actualizarUsuario, crearUsuario, listarUsuarios } from './backend/usuarios.js';
 import { exigir } from './backend/validaciones.js';
-import { crearCotizacionPdf } from './utils/pdf.js';
 
 const PUERTO = Number(process.env.PORT || 3000);
 inicializarBase();
 
+async function leerDatos(peticion) {
+  let cuerpo = '';
+  let bytes = 0;
+  peticion.setEncoding('utf8');
+  for await (const fragmento of peticion.iterator({ destroyOnReturn: false })) {
+    bytes += Buffer.byteLength(fragmento);
+    if (bytes >= 20000) {
+      peticion.resume();
+      throw Object.assign(new Error('Solicitud demasiado grande.'), { estado: 413 });
+    }
+    cuerpo += fragmento;
+  }
+  let datos;
+  try {
+    datos = JSON.parse(cuerpo || '{}');
+  } catch {
+    throw new Error('Los datos enviados tienen un formato inválido.');
+  }
+  exigir(datos && typeof datos === 'object' && !Array.isArray(datos), 'Envía un objeto de datos.');
+  return datos;
+}
+
 /* Servidor HTTP con autorización aplicada antes de cada operación. */
-const SERVIDOR = http.createServer(async (peticion, respuesta) => {
-  const url = new URL(peticion.url, `http://127.0.0.1:${PUERTO}`);
-  const ruta = url.pathname;
+const SERVIDOR = http.createServer({ requestTimeout: 15000 }, async (peticion, respuesta) => {
   const enviar = (resultado, estado = 200) => {
     respuesta.writeHead(estado, { 'Content-Type': 'application/json; charset=utf-8' });
     respuesta.end(JSON.stringify(resultado));
@@ -36,6 +60,8 @@ const SERVIDOR = http.createServer(async (peticion, respuesta) => {
     respuesta.end(contenido);
   };
   try {
+    const url = new URL(peticion.url, `http://127.0.0.1:${PUERTO}`);
+    const ruta = url.pathname;
     if (!ruta.startsWith('/api/')) {
       // Las rutas de React deben abrir también al recargar o pegar la URL.
       const esPagina = ruta === '/' || ruta === '/dashboard' || ruta.startsWith('/dashboard/');
@@ -52,23 +78,19 @@ const SERVIDOR = http.createServer(async (peticion, respuesta) => {
       respuesta.end(contenido);
       return;
     }
-    const base = leerBase();
-    const token = peticion.headers.cookie?.match(/(?:^|; )sesion=([^;]+)/)?.[1];
-    const usuario = obtenerUsuario(base, token);
     let datos = {};
     if (peticion.method === 'POST') {
-      let cuerpo = '';
-      for await (const fragmento of peticion) {
-        cuerpo += fragmento;
-        exigir(cuerpo.length < 20000, 'Solicitud demasiado grande.');
-      }
-      datos = JSON.parse(cuerpo || '{}');
       const origen = peticion.headers.origin;
       exigir(
         !origen || new URL(origen).host === peticion.headers.host,
         'Origen de solicitud no autorizado.',
       );
+      datos = await leerDatos(peticion);
     }
+    // Ya llegó el cuerpo. La lectura, la modificación y el guardado ocurren sin pausas.
+    const base = leerBase();
+    const token = peticion.headers.cookie?.match(/(?:^|; )sesion=([^;]+)/)?.[1];
+    const usuario = obtenerUsuario(base, token);
     if (ruta === '/api/login' && peticion.method === 'POST') {
       const sesion = iniciarSesion(base.usuarios, datos);
       respuesta.setHeader(
@@ -152,10 +174,14 @@ const SERVIDOR = http.createServer(async (peticion, respuesta) => {
     } else if (ruta === '/api/ordenes') {
       crearOrden(base, datos, usuario, esRecepcion);
     } else if (ruta.startsWith('/api/ordenes/')) {
-      actualizarOrden(base, ruta.split('/').pop(), datos, usuario, {
+      const seModifico = actualizarOrden(base, ruta.split('/').pop(), datos, usuario, {
         esRecepcion,
         esAdministrador,
       });
+      if (seModifico === false) {
+        enviar({ correcto: true });
+        return;
+      }
     } else if (ruta === '/api/usuarios') {
       crearUsuario(base, datos, esAdministrador);
     } else if (ruta.startsWith('/api/usuarios/')) {
@@ -166,7 +192,9 @@ const SERVIDOR = http.createServer(async (peticion, respuesta) => {
     guardar(base);
     enviar({ correcto: true });
   } catch (error) {
-    enviar({ error: error.message }, 400);
+    if (respuesta.destroyed) return;
+    if (error.estado === 413) respuesta.setHeader('Connection', 'close');
+    enviar({ error: error.message }, error.estado || 400);
   }
 });
 

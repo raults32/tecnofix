@@ -160,6 +160,7 @@ nav a.activo {
 .contenido {
   padding: 28px 36px;
   min-height: calc(100vh - 135px);
+  overflow-wrap: anywhere;
 }
 h2 {
   font-size: 16px;
@@ -175,6 +176,7 @@ h3 {
 }
 article,
 form {
+  min-width: 0;
   background: white;
   border: 1px solid #dce4ef;
   border-radius: 7px;

@@ -1,6 +1,6 @@
-import { ESTADOS_ORDEN } from '../utils/ordenUtils.js';
-import { crearDocumentoPdf } from '../utils/pdf.js';
-import { exigir } from './validaciones.js';
+import { ESTADOS_ORDEN } from '../../utils/ordenUtils.js';
+import { crearDocumentoPdf } from './pdf.js';
+import { exigir } from '../validaciones.js';
 
 /** Construye un PDF básico paginado, sin dependencias de servicios externos. */
 function crearPdf(lineas) {
@@ -27,10 +27,8 @@ export function generarReporte(base, parametros) {
   const inicio = parametros.get('inicio');
   const fin = parametros.get('fin');
   exigir(
-    /^\d{4}-\d{2}-\d{2}$/.test(inicio) &&
-      /^\d{4}-\d{2}-\d{2}$/.test(fin) &&
-      Number.isFinite(Date.parse(inicio)) &&
-      Number.isFinite(Date.parse(fin)) &&
+    esFechaValida(inicio) &&
+      esFechaValida(fin) &&
       inicio <= fin &&
       fin <= new Date().toISOString().slice(0, 10),
     'Rango de fechas inválido.',
@@ -71,6 +69,12 @@ export function generarReporte(base, parametros) {
         };
       }),
   };
+}
+
+function esFechaValida(valor) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(valor)) return false;
+  const fecha = new Date(valor);
+  return Number.isFinite(fecha.getTime()) && fecha.toISOString().slice(0, 10) === valor;
 }
 
 export function crearReportePdf(reporte, usuario) {

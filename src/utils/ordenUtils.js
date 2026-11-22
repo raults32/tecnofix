@@ -53,9 +53,24 @@ export function validarTransicion(orden, nuevoEstado, rol) {
 
 /** Calcula importes finitos y no negativos en centavos para evitar errores decimales. */
 export function calcularCosto(manoObra, refacciones) {
-  const importes = [Number(manoObra), Number(refacciones)];
-  if (importes.some((importe) => !Number.isFinite(importe) || importe < 0)) {
-    throw new Error('Los costos deben ser números no negativos.');
+  let total = 0;
+  for (const valor of [manoObra, refacciones]) {
+    const importe = Number(valor);
+    const centavos = Math.round(importe * 100);
+    if (
+      !['number', 'string'].includes(typeof valor) ||
+      String(valor).trim() === '' ||
+      importe < 0 ||
+      !Number.isSafeInteger(centavos) ||
+      !Number.isSafeInteger(total + centavos)
+    ) {
+      throw new Error('Los costos deben ser números no negativos dentro del rango permitido.');
+    }
+    total += centavos;
   }
-  return importes.reduce((total, importe) => total + Math.round(importe * 100), 0) / 100;
+  return total / 100;
+}
+
+export function pagosEnCentavos(orden) {
+  return (orden?.pagos || []).reduce((total, pago) => total + Math.round(pago.monto * 100), 0);
 }

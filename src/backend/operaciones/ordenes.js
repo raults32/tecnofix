@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
-import { validarTransicion, calcularCosto } from '../utils/ordenUtils.js';
-import { exigir, requerir } from './validaciones.js';
+import { validarTransicion, calcularCosto, pagosEnCentavos } from '../../utils/ordenUtils.js';
+import { exigir, requerir } from '../validaciones.js';
 
 /** Registra fecha y usuario de cada modificación de una orden. */
 function registrarCambio(orden, usuario, detalle) {
@@ -43,6 +43,21 @@ export function buscarOrdenDisponible(base, id, usuario, esRecepcion) {
 
 export function actualizarOrden(base, id, datos, usuario, { esRecepcion, esAdministrador }) {
   const orden = buscarOrdenDisponible(base, id, usuario, esRecepcion);
+  if (datos.accion === 'pago') {
+    exigir(esRecepcion, 'Solo Recepción registra pagos en LISTO.');
+    exigir(
+      typeof datos.idOperacion === 'string' && /^[a-f0-9]{32}$/.test(datos.idOperacion),
+      'Falta el identificador del pago. Actualiza la página e intenta de nuevo.',
+    );
+    const anterior = orden.pagos?.find((pago) => pago.idOperacion === datos.idOperacion);
+    if (anterior) {
+      exigir(
+        anterior.monto === Number(datos.monto) && anterior.metodo === datos.metodo,
+        'El identificador ya corresponde a otro pago.',
+      );
+      return false;
+    }
+  }
   exigir(!['ENTREGADO', 'CANCELADO'].includes(orden.estado), 'La orden ya está cerrada.');
   if (datos.accion === 'asignar') {
     asignarTecnico(base, orden, datos, esRecepcion, esAdministrador);
@@ -95,11 +110,11 @@ function cambiarEstado(orden, datos, usuario) {
     requerir(datos, ['descripcion']);
   }
   if (datos.estado === 'ENTREGADO') {
-    const pagado = (orden.pagos || []).reduce((total, pago) => total + pago.monto, 0);
     exigir(
-      Math.round(pagado * 100) >= Math.round(orden.total * 100),
+      pagosEnCentavos(orden) >= Math.round(orden.total * 100),
       'Registre el pago del saldo antes de entregar.',
     );
+    exigir(datos.equipoDevuelto === true, 'Confirma la devolución del equipo antes de entregar.');
   }
   orden.estado = datos.estado;
   if (orden.estado === 'LISTO') {
@@ -160,19 +175,22 @@ function enviarCotizacion(orden, usuario, esAdministrador) {
 function registrarPago(orden, datos, usuario, esRecepcion) {
   exigir(esRecepcion && orden.estado === 'LISTO', 'Solo Recepción registra pagos en LISTO.');
   const monto = Number(datos.monto);
-  const pagado = (orden.pagos || []).reduce((total, pago) => total + pago.monto, 0);
+  const centavos = Math.round(monto * 100);
   exigir(
-    Number.isFinite(monto) &&
-      monto > 0 &&
-      Math.round(monto * 100) <= Math.round((orden.total - pagado) * 100),
+    ['number', 'string'].includes(typeof datos.monto) &&
+      Number.isSafeInteger(centavos) &&
+      centavos > 0 &&
+      monto === centavos / 100 &&
+      centavos <= Math.round(orden.total * 100) - pagosEnCentavos(orden),
     'Monto inválido o mayor al saldo.',
   );
   exigir(['Efectivo', 'Tarjeta', 'Transferencia'].includes(datos.metodo), 'Método inválido.');
   orden.pagos = [
     ...(orden.pagos || []),
     {
-      monto: Math.round(monto * 100) / 100,
+      monto: centavos / 100,
       metodo: datos.metodo,
+      idOperacion: datos.idOperacion,
       fecha: new Date().toISOString(),
       usuario: usuario.nombre,
     },
@@ -217,13 +235,17 @@ function registrarDiagnosticoOReparacion(orden, datos, usuario, esAdministrador)
       orden.estado === 'EN_REPARACION' && orden.esDiagnosticoConcluido && orden.tieneAutorizacion,
       'La orden no está autorizada para reparación.',
     );
-    orden.reparacion = datos.descripcion;
-    orden.pruebasFinales = String(datos.pruebasFinales || '').slice(0, 1000);
-    orden.minutosTrabajo = Number(datos.minutosTrabajo || 0);
+    requerir(datos, ['pruebasFinales']);
+    const minutos = Number(datos.minutosTrabajo);
     exigir(
-      Number.isFinite(orden.minutosTrabajo) && orden.minutosTrabajo >= 0,
-      'Tiempo de reparación inválido.',
+      ['number', 'string'].includes(typeof datos.minutosTrabajo) &&
+        Number.isSafeInteger(minutos) &&
+        minutos > 0,
+      'El tiempo de reparación debe ser un número entero mayor que cero.',
     );
+    orden.reparacion = datos.descripcion;
+    orden.pruebasFinales = datos.pruebasFinales;
+    orden.minutosTrabajo = minutos;
   }
   orden.manoObra = Number(datos.manoObra);
   orden.costoRefacciones = Number(datos.costoRefacciones);

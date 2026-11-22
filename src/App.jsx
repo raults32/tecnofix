@@ -9,6 +9,7 @@ export default function App() {
   const usuario = useTecnoFixStore((state) => state.usuario);
   const mensaje = useTecnoFixStore((state) => state.mensaje);
   const cargando = useTecnoFixStore((state) => state.cargando);
+  const inicializada = useTecnoFixStore((state) => state.inicializada);
   const recuperarSesion = useTecnoFixStore((state) => state.recuperarSesion);
   const manejarOperacion = useTecnoFixStore((state) => state.manejarOperacion);
   const [rolAcceso, setRolAcceso] = useState('administrador');
@@ -50,6 +51,11 @@ export default function App() {
           <p role="alert" className="aviso">
             {mensaje}
           </p>
+        )}
+        {!inicializada && (
+          <button type="button" className="secundario" onClick={recuperarSesion}>
+            Reintentar conexión
+          </button>
         )}
         <small>Acceso exclusivo para empleados · Rol: {ROLES[rolAcceso]}</small>
         <strong className="etiqueta-caso">UC09 Iniciar sesión</strong>

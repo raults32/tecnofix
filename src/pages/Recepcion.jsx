@@ -5,44 +5,96 @@
 // Fecha: 9 de noviembre de 2026
 
 /* Importaciones de presentación y captura. */
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import Formulario from '../components/Formulario.jsx';
+import { leerPagoPendiente } from '../store/pagosPendientes.js';
+import { useTecnoFixStore } from '../store/tecnofix.js';
+import { guardarEnSesion, leerEnSesion } from '../utils/almacenSesion.js';
+import { pagosEnCentavos } from '../utils/ordenUtils.js';
 import { capturarFormulario, MONEDA, obtenerEstado } from '../utils/vistaUtils.js';
 
 /** Implementa recepción por pasos, aprobación de cotizaciones y entrega con pagos. */
-function Recepcion({ datos, orden, seccion, manejarOperacion, manejarNavegar, manejarAbrir }) {
+function Recepcion({
+  datos,
+  orden,
+  seccion,
+  usuario,
+  manejarOperacion,
+  manejarNavegar,
+  manejarAbrir,
+}) {
   /* Selecciones de registros existentes y etapa del ingreso. */
-  const [paso, setPaso] = useState(1);
-  const [idCliente, setIdCliente] = useState('');
-  const [idEquipo, setIdEquipo] = useState('');
-  const [esNuevoCliente, setEsNuevoCliente] = useState(false);
-  const [esNuevoEquipo, setEsNuevoEquipo] = useState(false);
+  const claveBorrador = `tecnofix:borrador:${usuario.id}:recepcion`;
+  const [borrador] = useState(() => leerEnSesion(claveBorrador) || {});
+  const [pasoGuardado, setPaso] = useState(borrador.paso || 1);
+  const [clienteGuardado, setIdCliente] = useState(borrador.idCliente || '');
+  const [equipoGuardado, setIdEquipo] = useState(borrador.idEquipo || '');
+  const [esNuevoCliente, setEsNuevoCliente] = useState(Boolean(borrador.esNuevoCliente));
+  const [esNuevoEquipo, setEsNuevoEquipo] = useState(Boolean(borrador.esNuevoEquipo));
   const [idSeleccion, setIdSeleccion] = useState('');
+  const bloqueado = useTecnoFixStore((state) => state.enviando || state.datosDesactualizados);
+  const idCliente = datos.clientes.some((cliente) => cliente.id === clienteGuardado)
+    ? clienteGuardado
+    : '';
+  const equipos = datos.equipos.filter((equipo) => equipo.idCliente === idCliente);
+  const idEquipo = equipos.some((equipo) => equipo.id === equipoGuardado) ? equipoGuardado : '';
+  const paso = Math.min(pasoGuardado, idEquipo ? 3 : idCliente ? 2 : 1);
   const actual = datos.ordenes.find((elemento) => elemento.id === idSeleccion) || orden;
-  const manejarCrear = async (ruta, valores, formulario) => {
-    if (await manejarOperacion(ruta, valores, formulario)) {
-      if (ruta === 'clientes') {
-        setEsNuevoCliente(false);
-      } else if (ruta === 'equipos') {
-        setEsNuevoEquipo(false);
-      } else {
-        manejarNavegar('inicio');
-      }
+  const rutaActual = actual ? `ordenes/${actual.id}` : '';
+  const pagoPendiente = actual && leerPagoPendiente(usuario.id, rutaActual);
+  const pagado = pagosEnCentavos(actual);
+  const saldo = Math.max(0, Math.round((actual?.total || 0) * 100) - pagado) / 100;
+
+  useEffect(() => {
+    if (seccion === 'nueva') {
+      guardarEnSesion(claveBorrador, {
+        paso: pasoGuardado,
+        idCliente: clienteGuardado,
+        idEquipo: equipoGuardado,
+        esNuevoCliente,
+        esNuevoEquipo,
+      });
     }
+  }, [
+    seccion,
+    claveBorrador,
+    pasoGuardado,
+    clienteGuardado,
+    equipoGuardado,
+    esNuevoCliente,
+    esNuevoEquipo,
+  ]);
+
+  const manejarCrear = async (ruta, valores, formulario) => {
+    if (!(await manejarOperacion(ruta, valores, formulario))) return false;
+    if (ruta === 'clientes') {
+      setEsNuevoCliente(false);
+    } else if (ruta === 'equipos') {
+      setEsNuevoEquipo(false);
+    } else {
+      guardarEnSesion(claveBorrador, null);
+      setPaso(1);
+      setIdCliente('');
+      setIdEquipo('');
+      manejarNavegar('inicio');
+    }
+    return true;
   };
   const manejarDecision = (evento) => {
     const valores = capturarFormulario(evento);
     manejarOperacion(`ordenes/${actual.id}`, { accion: 'autorizar', ...valores });
   };
-  const manejarPago = (evento) => {
+  const manejarPago = async (evento) => {
+    const formulario = evento.currentTarget;
     const valores = capturarFormulario(evento);
-    manejarOperacion(`ordenes/${actual.id}`, { accion: 'pago', ...valores });
+    if (await manejarOperacion(rutaActual, { accion: 'pago', ...valores })) {
+      formulario.elements.monto.value = '';
+    }
   };
   const opcionesClientes = datos.clientes.map((cliente) => ({
     valor: cliente.id,
     texto: `${cliente.nombre} · ${cliente.telefono}`,
   }));
-  const equipos = datos.equipos.filter((equipo) => equipo.idCliente === idCliente);
 
   return seccion === 'nueva' ? (
     <>
@@ -84,9 +136,16 @@ function Recepcion({ datos, orden, seccion, manejarOperacion, manejarNavegar, ma
           {esNuevoCliente && (
             <Formulario
               titulo="Nuevo cliente"
+              claveBorrador={`${claveBorrador}:cliente`}
               campos={[
                 { nombre: 'nombre', etiqueta: 'Nombre completo' },
-                { nombre: 'telefono', etiqueta: 'Teléfono (10 dígitos)' },
+                {
+                  nombre: 'telefono',
+                  etiqueta: 'Teléfono (10 dígitos)',
+                  tipo: 'tel',
+                  patron: '[0-9]{10}',
+                  ayuda: 'Escribe 10 dígitos sin espacios.',
+                },
                 { nombre: 'correo', etiqueta: 'Correo', tipo: 'email' },
               ]}
               manejarEnvio={(valores, formulario) => manejarCrear('clientes', valores, formulario)}
@@ -120,6 +179,8 @@ function Recepcion({ datos, orden, seccion, manejarOperacion, manejarNavegar, ma
               </button>
               {esNuevoEquipo && (
                 <Formulario
+                  key={idCliente}
+                  claveBorrador={`${claveBorrador}:equipo:${idCliente}`}
                   titulo="Nuevo equipo"
                   campos={[
                     { nombre: 'marca', etiqueta: 'Marca' },
@@ -147,6 +208,8 @@ function Recepcion({ datos, orden, seccion, manejarOperacion, manejarNavegar, ma
             <p>Selecciona un equipo para generar la orden.</p>
           ) : (
             <Formulario
+              key={idEquipo}
+              claveBorrador={`${claveBorrador}:orden:${idEquipo}`}
               titulo=""
               etiqueta="Generar orden"
               campos={[
@@ -251,9 +314,16 @@ function Recepcion({ datos, orden, seccion, manejarOperacion, manejarNavegar, ma
             </label>
             <label>
               Notas
-              <textarea name="descripcion" required placeholder="Cliente confirma…" />
+              <textarea
+                name="descripcion"
+                required
+                maxLength={1000}
+                placeholder="Cliente confirma…"
+              />
             </label>
-            <button disabled={actual.estado !== 'EN_DIAGNOSTICO'}>Registrar aprobación</button>
+            <button disabled={bloqueado || actual.estado !== 'EN_DIAGNOSTICO'}>
+              Registrar aprobación
+            </button>
             <p>Decisión actual: {actual.decision || 'Pendiente'}</p>
           </form>
         </section>
@@ -275,7 +345,7 @@ function Recepcion({ datos, orden, seccion, manejarOperacion, manejarNavegar, ma
               Ver bitácora
             </button>
           </article>
-          <form onSubmit={manejarPago} key={actual.id}>
+          <form onSubmit={manejarPago} key={actual.id} aria-busy={bloqueado}>
             <h2>Pago (UC19)</h2>
             <div className="columnas">
               <label>
@@ -284,29 +354,21 @@ function Recepcion({ datos, orden, seccion, manejarOperacion, manejarNavegar, ma
               </label>
               <label>
                 Pagos registrados
-                <input
-                  readOnly
-                  value={MONEDA.format(
-                    (actual.pagos || []).reduce((total, pago) => total + pago.monto, 0),
-                  )}
-                />
+                <input readOnly value={MONEDA.format(pagado / 100)} />
               </label>
             </div>
             <div className="total">
               Saldo a cobrar
-              <strong>
-                {MONEDA.format(
-                  Math.max(
-                    0,
-                    actual.total -
-                      (actual.pagos || []).reduce((total, pago) => total + pago.monto, 0),
-                  ),
-                )}
-              </strong>
+              <strong>{MONEDA.format(saldo)}</strong>
             </div>
+            {pagoPendiente && (
+              <p role="status">
+                Hay un abono por confirmar. Usa el mismo monto y método para comprobarlo.
+              </p>
+            )}
             <label>
               Método de pago
-              <select name="metodo">
+              <select name="metodo" defaultValue={pagoPendiente?.metodo || 'Efectivo'}>
                 <option>Efectivo</option>
                 <option>Tarjeta</option>
                 <option>Transferencia</option>
@@ -314,9 +376,21 @@ function Recepcion({ datos, orden, seccion, manejarOperacion, manejarNavegar, ma
             </label>
             <label>
               Monto recibido
-              <input type="number" min="0.01" step="0.01" name="monto" required />
+              <input
+                type="number"
+                min="0.01"
+                max={pagoPendiente ? undefined : saldo}
+                step="0.01"
+                name="monto"
+                defaultValue={pagoPendiente?.monto ?? ''}
+                required
+              />
             </label>
-            <button disabled={actual.estado === 'ENTREGADO'}>Registrar pago</button>
+            <button
+              disabled={bloqueado || (!pagoPendiente && (actual.estado !== 'LISTO' || saldo === 0))}
+            >
+              {pagoPendiente ? 'Confirmar abono' : 'Registrar pago'}
+            </button>
             <div className="separador" />
             <label className="opcion">
               <input
@@ -335,7 +409,7 @@ function Recepcion({ datos, orden, seccion, manejarOperacion, manejarNavegar, ma
             <button
               type="button"
               className="secundario"
-              disabled={actual.estado !== 'LISTO'}
+              disabled={bloqueado || actual.estado !== 'LISTO'}
               onClick={(evento) => {
                 if (!evento.currentTarget.form.dataset.esVerificado) {
                   evento.currentTarget.form
@@ -344,7 +418,11 @@ function Recepcion({ datos, orden, seccion, manejarOperacion, manejarNavegar, ma
                   evento.currentTarget.form.querySelector('#devolucion').reportValidity();
                   return;
                 }
-                manejarOperacion(`ordenes/${actual.id}`, { accion: 'estado', estado: 'ENTREGADO' });
+                manejarOperacion(rutaActual, {
+                  accion: 'estado',
+                  estado: 'ENTREGADO',
+                  equipoDevuelto: true,
+                });
               }}
             >
               Entregar y cerrar orden

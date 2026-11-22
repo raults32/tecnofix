@@ -1,5 +1,6 @@
 const PAGINA = [595, 842];
 
+/** Arma el archivo PDF a partir del contenido de sus páginas. */
 export function crearDocumentoPdf(contenidos) {
   const objetos = ['', ''];
   const paginas = [];

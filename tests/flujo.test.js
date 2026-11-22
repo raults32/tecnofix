@@ -7,6 +7,7 @@
 /* Importaciones del ejecutor y del servidor aislado. */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { randomBytes } from 'node:crypto';
 import { spawn } from 'node:child_process';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -16,7 +17,7 @@ import { validarTransicion, calcularCosto } from '../src/utils/ordenUtils.js';
 /* Pruebas de reglas puras. */
 test('Costos: redondeo y rechazo de negativos, infinitos y texto', () => {
   assert.equal(calcularCosto('0.10', '0.20'), 0.3);
-  for (const valor of [-1, 'abc', Infinity]) {
+  for (const valor of [-1, 'abc', Infinity, '', ' ', null, true, 1e20]) {
     assert.throws(() => calcularCosto(valor, 0));
   }
 });
@@ -68,6 +69,13 @@ test('Flujo integrado, permisos, PDF, reportes y persistencia', async () => {
     return respuesta.json();
   };
   const entrar = async (usuario) => consultar('login', { usuario, contrasena: 'Taller2026!' });
+  const pago = (monto, metodo = 'Efectivo') => ({
+    accion: 'pago',
+    monto,
+    metodo,
+    idOperacion: randomBytes(16).toString('hex'),
+  });
+  const entrega = { accion: 'estado', estado: 'ENTREGADO', equipoDevuelto: true };
   try {
     proceso = iniciar();
     await esperar();
@@ -90,6 +98,15 @@ test('Flujo integrado, permisos, PDF, reportes y persistencia', async () => {
     assert.equal(apiInexistente.ok, false);
     await consultar('datos', undefined, false);
     await entrar('administrador');
+    for (const cuerpo of ['{', 'null', '[]', JSON.stringify({ nombre: 'á'.repeat(11000) })]) {
+      const respuesta = await fetch('http://127.0.0.1:3197/api/clientes', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Cookie: cookie },
+        body: cuerpo,
+      });
+      assert.equal(respuesta.status, cuerpo.length > 10000 ? 413 : 400);
+      assert.equal(typeof (await respuesta.json()).error, 'string');
+    }
     await consultar('clientes', {
       nombre: 'Cliente de prueba',
       telefono: '6461234567',
@@ -193,16 +210,37 @@ test('Flujo integrado, permisos, PDF, reportes y persistencia', async () => {
       manoObra: '100',
       costoRefacciones: '250',
       refacciones: 'Una fuente nueva',
+      pruebasFinales: 'Arranque y estabilidad comprobados.',
+      minutosTrabajo: '25',
     });
     await consultar(ruta, { accion: 'estado', estado: 'LISTO' });
-    await consultar(ruta, { accion: 'estado', estado: 'ENTREGADO' }, false);
-    await consultar(ruta, { accion: 'pago', monto: '350', metodo: 'Efectivo' }, false);
+    await consultar(ruta, entrega, false);
+    await consultar(ruta, pago('350'), false);
     await entrar('recepcion');
-    await consultar(ruta, { accion: 'estado', estado: 'ENTREGADO' }, false);
-    await consultar(ruta, { accion: 'pago', monto: '500', metodo: 'Efectivo' }, false);
-    await consultar(ruta, { accion: 'pago', monto: '100', metodo: 'Efectivo' });
-    await consultar(ruta, { accion: 'pago', monto: '250', metodo: 'Tarjeta' });
-    await consultar(ruta, { accion: 'estado', estado: 'ENTREGADO' });
+    assert.match((await consultar(ruta, entrega, false)).error, /saldo/);
+    for (const monto of ['500', '-1', 'texto', '0.001']) {
+      assert.match((await consultar(ruta, pago(monto), false)).error, /Monto inválido/);
+    }
+    await consultar(ruta, { accion: 'pago', monto: '100', metodo: 'Efectivo' }, false);
+    const primerAbono = pago('100');
+    await Promise.all([consultar(ruta, primerAbono), consultar(ruta, primerAbono)]);
+    datos = await consultar('datos');
+    assert.deepEqual(
+      datos.ordenes[0].pagos.map((abono) => abono.monto),
+      [100],
+    );
+    await consultar(ruta, { ...primerAbono, monto: '50' }, false);
+    await Promise.all([consultar(ruta, pago('100')), consultar(ruta, pago('150', 'Tarjeta'))]);
+    datos = await consultar('datos');
+    assert.deepEqual(
+      datos.ordenes[0].pagos.map((abono) => abono.monto).sort((a, b) => a - b),
+      [100, 100, 150],
+    );
+    assert.match(
+      (await consultar(ruta, { ...entrega, equipoDevuelto: false }, false)).error,
+      /devolución/,
+    );
+    await consultar(ruta, entrega);
     await entrar('administrador');
     const hoy = new Date().toISOString().slice(0, 10);
     const reporte = await consultar(`reportes?inicio=${hoy}&fin=${hoy}`);
@@ -211,6 +249,7 @@ test('Flujo integrado, permisos, PDF, reportes y persistencia', async () => {
     assert.equal(reporte.productividad[0].cantidad, 1);
     await consultar(`reporte.pdf?inicio=${hoy}&fin=${hoy}`);
     await consultar('reportes?inicio=2026-12-31&fin=2026-01-01', undefined, false);
+    await consultar('reportes?inicio=2026-02-31&fin=2026-03-10', undefined, false);
     await consultar('usuarios', {
       nombre: 'Temporal',
       usuario: 'temporal',
@@ -249,6 +288,9 @@ test('Flujo integrado, permisos, PDF, reportes y persistencia', async () => {
     await entrar('administrador');
     datos = await consultar('datos');
     assert.equal(datos.ordenes[0].estado, 'ENTREGADO');
+    await consultar(ruta, primerAbono);
+    datos = await consultar('datos');
+    assert.equal(datos.ordenes[0].pagos.length, 3);
   } finally {
     if (proceso && proceso.exitCode === null) {
       await new Promise((resolver) => {
