@@ -22,6 +22,7 @@ import { cerrarSesion, iniciarSesion, obtenerUsuario } from './backend/sesion.js
 import { exigir } from './backend/validaciones.js';
 
 const PUERTO = Number(process.env.PORT || 3000);
+const HOST = process.env.HOST || (process.env.PORT ? '0.0.0.0' : '127.0.0.1');
 inicializarBase();
 
 async function leerDatos(peticion) {
@@ -221,4 +222,4 @@ const SERVIDOR = http.createServer({ requestTimeout: 15000 }, async (peticion, r
   }
 });
 
-SERVIDOR.listen(PUERTO, '127.0.0.1');
+SERVIDOR.listen(PUERTO, HOST);
