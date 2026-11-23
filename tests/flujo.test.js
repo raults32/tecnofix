@@ -1,7 +1,7 @@
-// Nombre: Desarrollo asistido por Codex; revisiÃ³n pendiente del Equipo 5
-// Proyecto: Sistema de GestiÃ³n para Servicio TÃ©cnico de Computadoras
+// Nombre: Desarrollo asistido por Codex; revisión pendiente del Equipo 5
+// Proyecto: Sistema de Gestión para Servicio Técnico de Computadoras
 // Archivo: flujo.test.js
-// DescripciÃ³n: tests/flujo.test.js
+// Descripción: tests/flujo.test.js
 // Fecha: 9 de noviembre de 2026
 
 /* Importaciones del ejecutor y del servidor aislado. */
@@ -13,6 +13,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { validarTransicion, calcularCosto } from '../src/utils/ordenUtils.js';
+import { fechaDelTaller } from '../src/utils/fechas.js';
 
 /* Pruebas de reglas puras. */
 test('Costos: redondeo y rechazo de negativos, infinitos y texto', () => {
@@ -26,6 +27,11 @@ test('Estados: no permite saltos ni avanzar sin asignación', () => {
   assert.throws(() => validarTransicion({ estado: 'RECIBIDO' }, 'ENTREGADO', 'administrador'));
   assert.throws(() => validarTransicion({ estado: 'RECIBIDO' }, 'EN_DIAGNOSTICO', 'tecnico'));
   assert.throws(() => validarTransicion({ estado: 'ENTREGADO' }, 'RECIBIDO', 'administrador'));
+});
+
+test('Los reportes usan la fecha de Tijuana al cambiar de día en UTC', () => {
+  assert.equal(fechaDelTaller('2026-11-23T03:59:00Z'), '2026-11-22');
+  assert.equal(fechaDelTaller('2026-11-23T08:00:00Z'), '2026-11-23');
 });
 
 /* Escenario real contra HTTP y persistencia temporal. */
@@ -80,13 +86,15 @@ test('Flujo integrado, permisos, PDF, reportes y persistencia', async () => {
     proceso = iniciar();
     await esperar();
     const faltante = await fetch('http://127.0.0.1:3197/favicon.ico');
-    assert.equal(faltante.ok, false);
+    assert.equal(faltante.status, 404);
+    assert.ok(!(await faltante.text()).includes('ENOENT'));
     const inicio = await fetch('http://127.0.0.1:3197/');
     assert.ok((await inicio.text()).includes('root'));
     for (const ruta of [
       '/dashboard',
       '/dashboard/detalle/orden-prueba',
       '/dashboard/piezas/orden-prueba',
+      '/ruta-desconocida',
     ]) {
       const pagina = await fetch(`http://127.0.0.1:3197${ruta}`);
       assert.equal(pagina.status, 200);
@@ -140,6 +148,12 @@ test('Flujo integrado, permisos, PDF, reportes y persistencia', async () => {
     await consultar(ruta, { accion: 'estado', estado: 'LISTO' }, false);
     await consultar(`cotizacion/${idOrden}`, undefined, false);
     await consultar(ruta, { accion: 'asignar', idTecnico: datos.tecnicos[0].id });
+    const tecnicoAsignado = datos.tecnicos[0];
+    await consultar(
+      ruta,
+      { accion: 'asignar', idTecnico: tecnicoAsignado.id, descripcion: 'Sin cambio de técnico.' },
+      false,
+    );
     await entrar('tecnico');
     await consultar('clientes', { nombre: 'Intruso' }, false);
     await consultar('reportes?inicio=2026-01-01&fin=2026-11-09', undefined, false);
@@ -171,12 +185,27 @@ test('Flujo integrado, permisos, PDF, reportes y persistencia', async () => {
       false,
     );
     await consultar(ruta, { accion: 'enviarCotizacion' });
+    await consultar(ruta, { accion: 'enviarCotizacion' });
     datos = await consultar('datos');
     assert.equal(datos.ordenes[0].piezas[0].nombre, 'Fuente');
     assert.equal(datos.ordenes[0].esCotizacionEnviada, true);
+    assert.equal(
+      datos.ordenes[0].historial.filter((entrada) => entrada.tipo === 'enviarCotizacion').length,
+      1,
+    );
     await consultar(`cotizacion/${idOrden}`);
     await consultar(ruta, { accion: 'estado', estado: 'EN_REPARACION' }, false);
     await entrar('recepcion');
+    await consultar(
+      ruta,
+      { accion: 'autorizar', descripcion: ' \u200b ', decision: 'aprobada' },
+      false,
+    );
+    await consultar(
+      ruta,
+      { accion: 'autorizar', descripcion: 'Confirmación de prueba', decision: '' },
+      false,
+    );
     await consultar(ruta, {
       accion: 'autorizar',
       decision: 'rechazada',
@@ -242,12 +271,20 @@ test('Flujo integrado, permisos, PDF, reportes y persistencia', async () => {
     );
     await consultar(ruta, entrega);
     await entrar('administrador');
-    const hoy = new Date().toISOString().slice(0, 10);
+    const hoy = fechaDelTaller();
     const reporte = await consultar(`reportes?inicio=${hoy}&fin=${hoy}`);
     assert.equal(reporte.ingresos, 350);
     assert.equal(reporte.estados.ENTREGADO, 1);
     assert.equal(reporte.productividad[0].cantidad, 1);
-    await consultar(`reporte.pdf?inicio=${hoy}&fin=${hoy}`);
+    const reportePdf = await consultar(`reporte.pdf?inicio=${hoy}&fin=${hoy}`);
+    for (const texto of [
+      'TecnoFix',
+      'Reporte administrativo',
+      'Órdenes por estado',
+      'Productividad por técnico',
+    ]) {
+      assert.ok(reportePdf.includes(Buffer.from(texto, 'latin1').toString('hex')));
+    }
     await consultar('reportes?inicio=2026-12-31&fin=2026-01-01', undefined, false);
     await consultar('reportes?inicio=2026-02-31&fin=2026-03-10', undefined, false);
     await consultar('usuarios', {
@@ -278,6 +315,26 @@ test('Flujo integrado, permisos, PDF, reportes y persistencia', async () => {
     );
     datos = await consultar('datos');
     assert.ok(datos.ordenes[0].historial.length >= 8);
+    const historial = datos.ordenes[0].historial;
+    assert.equal(historial.filter((entrada) => entrada.tipo === 'asignar').length, 1);
+    assert.equal(
+      historial.find((entrada) => entrada.tipo === 'asignar').tecnico,
+      tecnicoAsignado.nombre,
+    );
+    assert.equal(historial.filter((entrada) => entrada.tipo === 'autorizar').length, 2);
+    assert.deepEqual(
+      historial
+        .filter((entrada) => entrada.tipo === 'pago')
+        .map(({ monto, metodo }) => [monto, metodo])
+        .sort((a, b) => a[0] - b[0]),
+      [
+        [100, 'Efectivo'],
+        [100, 'Efectivo'],
+        [150, 'Tarjeta'],
+      ],
+    );
+    assert.equal(historial.at(-1).estado, 'ENTREGADO');
+    assert.equal(historial.at(-1).detalle, 'Devolución del equipo y accesorios confirmada.');
     await new Promise((resolver) => {
       proceso.once('exit', resolver);
       proceso.kill();
@@ -291,6 +348,7 @@ test('Flujo integrado, permisos, PDF, reportes y persistencia', async () => {
     await consultar(ruta, primerAbono);
     datos = await consultar('datos');
     assert.equal(datos.ordenes[0].pagos.length, 3);
+    assert.deepEqual(datos.ordenes[0].historial, historial);
   } finally {
     if (proceso && proceso.exitCode === null) {
       await new Promise((resolver) => {

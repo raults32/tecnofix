@@ -107,16 +107,12 @@ nav a.activo {
 }
 .cerrar-sesion {
   margin-top: auto;
-  display: flex;
-  justify-content: space-between;
+  text-align: left;
   font-size: 12px;
   background: transparent;
   border: 0;
   color: #c0cce5;
   padding: 14px 12px;
-}
-.cerrar-sesion small {
-  font-size: 10px;
 }
 .cabecera {
   height: 88px;
@@ -326,11 +322,23 @@ th {
   color: #536079;
   font-size: 11px;
   font-weight: 650;
+  white-space: nowrap;
 }
 th,
 td {
   padding: 15px 12px;
   border-bottom: 1px solid #e3e8f1;
+}
+.tabla-ordenes td:first-child,
+.tabla-ordenes td:nth-child(4),
+.tabla-ordenes td:nth-child(5),
+.tabla-ordenes td:last-child {
+  white-space: nowrap;
+}
+.tabla-ordenes td:nth-child(2),
+.tabla-ordenes td:nth-child(3) {
+  max-width: 280px;
+  overflow-wrap: anywhere;
 }
 td {
   color: #34425c;
@@ -521,6 +529,56 @@ form > small {
 .editor-usuario {
   max-width: 600px;
 }
+.bitacora-lista {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.bitacora-movimiento {
+  position: relative;
+  margin-left: 5px;
+  padding: 0 0 16px 18px;
+  border-left: 1px solid #dce4ef;
+}
+.bitacora-movimiento:last-child {
+  padding-bottom: 0;
+  border-left-color: transparent;
+}
+.bitacora-movimiento::before {
+  position: absolute;
+  top: 4px;
+  left: -5px;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--acento, #2d79b9);
+  content: '';
+}
+.bitacora-cabecera,
+.bitacora-autor {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 3px 12px;
+}
+.bitacora-cabecera time,
+.bitacora-cabecera > span,
+.bitacora-autor {
+  color: #536079;
+  font-size: 12px;
+}
+.bitacora-autor {
+  margin-top: 3px;
+}
+.bitacora-resumen,
+.bitacora-detalle {
+  margin: 5px 0 0;
+  white-space: pre-line;
+  overflow-wrap: anywhere;
+}
+.bitacora-resumen {
+  font-weight: 600;
+}
 .pasos {
   display: flex;
   max-width: 650px;
@@ -535,6 +593,7 @@ form > small {
   box-shadow: 0 0 0 2px var(--acento);
 }
 .enlace {
+  display: block;
   border: 0;
   background: transparent;
   color: var(--acento);
@@ -724,12 +783,6 @@ footer {
 .roles-acceso button {
   padding: 7px 12px;
   font-size: 11px;
-}
-.etiqueta-caso {
-  display: block;
-  font-size: 12px;
-  color: var(--acento);
-  margin-top: 24px;
 }
 .peligro {
   color: #c5362a;

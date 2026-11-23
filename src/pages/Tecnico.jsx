@@ -1,7 +1,7 @@
-// Nombre: Desarrollo asistido por Codex; revisiÃ³n pendiente del Equipo 5
-// Proyecto: Sistema de GestiÃ³n para Servicio TÃ©cnico de Computadoras
+// Nombre: Desarrollo asistido por Codex; revisión pendiente del Equipo 5
+// Proyecto: Sistema de Gestión para Servicio Técnico de Computadoras
 // Archivo: Tecnico.jsx
-// DescripciÃ³n: Pantallas funcionales basadas en los prototipos TecnoFix.
+// Descripción: Pantallas funcionales basadas en los prototipos TecnoFix.
 // Fecha: 9 de noviembre de 2026
 
 /* Importaciones de presentación y captura. */
@@ -47,11 +47,18 @@ function Tecnico({ orden, usuario, seccion, manejarOperacion, manejarNavegar }) 
     guardarBorrador({ piezas: partidas });
   };
   const manejarAgregar = (evento) => {
+    const campoNombre = evento.currentTarget.elements.nombre;
     const valores = capturarFormulario(evento);
+    const nombre = valores.nombre.trim();
+    if (!nombre) {
+      campoNombre.setCustomValidity('Escribe el nombre de la pieza.');
+      campoNombre.reportValidity();
+      return;
+    }
     cambiarPiezas([
       ...piezas,
       {
-        nombre: valores.nombre,
+        nombre,
         cantidad: Number(valores.cantidad),
         costo: Number(valores.costo),
         disponibilidad: valores.disponibilidad,
@@ -115,6 +122,7 @@ function Tecnico({ orden, usuario, seccion, manejarOperacion, manejarNavegar }) 
         </dl>
         {orden.estado === 'RECIBIDO' && (
           <button
+            disabled={bloqueado}
             onClick={() =>
               manejarOperacion(`ordenes/${orden.id}`, {
                 accion: 'estado',
@@ -190,7 +198,13 @@ function Tecnico({ orden, usuario, seccion, manejarOperacion, manejarNavegar }) 
         >
           <label>
             Pieza
-            <input name="nombre" required maxLength="100" defaultValue={partida?.nombre} />
+            <input
+              name="nombre"
+              required
+              maxLength="100"
+              defaultValue={partida?.nombre}
+              onInput={(evento) => evento.currentTarget.setCustomValidity('')}
+            />
           </label>
           <label>
             Cantidad
@@ -360,10 +374,15 @@ function Tecnico({ orden, usuario, seccion, manejarOperacion, manejarNavegar }) 
           )}
           <button
             className="secundario"
-            disabled={orden.estado !== 'EN_DIAGNOSTICO'}
+            disabled={
+              bloqueado ||
+              orden.estado !== 'EN_DIAGNOSTICO' ||
+              !orden.esDiagnosticoConcluido ||
+              orden.esCotizacionEnviada
+            }
             onClick={() => manejarOperacion(`ordenes/${orden.id}`, { accion: 'enviarCotizacion' })}
           >
-            Enviar a Recepción
+            {orden.esCotizacionEnviada ? 'Cotización enviada' : 'Enviar a Recepción'}
           </button>
           <button className="secundario" onClick={() => manejarNavegar('piezas')}>
             Volver a editar piezas
@@ -375,7 +394,7 @@ function Tecnico({ orden, usuario, seccion, manejarOperacion, manejarNavegar }) 
   ) : (
     <section className="columnas">
       <form onSubmit={manejarReparacion} onChange={guardarCamposBorrador}>
-        <h2>Registro de reparación (UC06)</h2>
+        <h2>Registro de reparación</h2>
         <label>
           Trabajo realizado
           <textarea
@@ -412,7 +431,7 @@ function Tecnico({ orden, usuario, seccion, manejarOperacion, manejarNavegar }) 
         <button disabled={bloqueado || orden.estado !== 'EN_REPARACION'}>Guardar reparación</button>
       </form>
       <article>
-        <h2>Estado de la orden (UC07)</h2>
+        <h2>Estado de la orden</h2>
         <ol className="linea-estados">
           {['Recibido', 'En diagnóstico', 'Esperando aprobación', 'En reparación', 'Listo'].map(
             (estado) => (
@@ -424,7 +443,7 @@ function Tecnico({ orden, usuario, seccion, manejarOperacion, manejarNavegar }) 
         </ol>
         {orden.estado === 'EN_DIAGNOSTICO' && (
           <button
-            disabled={!orden.tieneAutorizacion}
+            disabled={bloqueado || !orden.tieneAutorizacion}
             onClick={() =>
               manejarOperacion(`ordenes/${orden.id}`, { accion: 'estado', estado: 'EN_REPARACION' })
             }
@@ -434,7 +453,7 @@ function Tecnico({ orden, usuario, seccion, manejarOperacion, manejarNavegar }) 
         )}
         {orden.estado === 'EN_REPARACION' && (
           <button
-            disabled={!orden.reparacion}
+            disabled={bloqueado || !orden.reparacion}
             onClick={() =>
               manejarOperacion(`ordenes/${orden.id}`, { accion: 'estado', estado: 'LISTO' })
             }

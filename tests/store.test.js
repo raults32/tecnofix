@@ -132,3 +132,13 @@ test('La API muestra avisos claros para una espera vencida y una respuesta invá
   globalThis.fetch = async () => new Response('<html>error</html>', { status: 502 });
   await assert.rejects(solicitar('sesion'), /respuesta inesperada/);
 });
+
+test('Usuarios y roles acepta la lista JSON que devuelve la API', async (t) => {
+  const fetchOriginal = globalThis.fetch;
+  t.after(() => {
+    globalThis.fetch = fetchOriginal;
+  });
+  const usuarios = [{ id: 'usuario-1', nombre: 'Técnico', rol: 'tecnico' }];
+  globalThis.fetch = async () => Response.json(usuarios);
+  assert.deepEqual(await solicitar('usuarios'), usuarios);
+});

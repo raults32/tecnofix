@@ -58,7 +58,6 @@ export default function App() {
           </button>
         )}
         <small>Acceso exclusivo para empleados · Rol: {ROLES[rolAcceso]}</small>
-        <strong className="etiqueta-caso">UC09 Iniciar sesión</strong>
       </section>
     </main>
   );

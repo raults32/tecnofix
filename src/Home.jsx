@@ -5,6 +5,8 @@ import Administracion from './pages/Administracion.jsx';
 import Recepcion from './pages/Recepcion.jsx';
 import Tecnico from './pages/Tecnico.jsx';
 import Historial from './pages/Historial.jsx';
+import NotFound from './NotFound.jsx';
+import { fechaDelTaller } from './utils/fechas.js';
 import { obtenerEstado } from './utils/vistaUtils.js';
 
 // Conserva las pantallas anteriores. El Layout les comparte los mismos datos.
@@ -25,6 +27,23 @@ export default function Home() {
     manejarAbrir,
     manejarNavegar,
   } = propiedades;
+  const vistaAdministracion =
+    esAdministrador && ['inicio', 'asignar', 'reportes', 'usuarios'].includes(seccion);
+  const vistaRecepcion =
+    usuario.rol !== 'tecnico' && ['nueva', 'cotizaciones', 'entregas'].includes(seccion);
+  const vistaTecnico =
+    usuario.rol === 'tecnico' &&
+    ['diagnostico', 'piezas', 'cotizacion', 'reparacion'].includes(seccion);
+  if (
+    seccion !== 'inicio' &&
+    seccion !== 'historial' &&
+    !vistaAdministracion &&
+    !vistaRecepcion &&
+    !vistaTecnico
+  ) {
+    return <NotFound titulo="Esta pantalla no está disponible para tu rol" />;
+  }
+  const hoy = fechaDelTaller();
   const ordenesFiltradas = datos.ordenes.filter((elemento) =>
     [elemento.folio, elemento.cliente, elemento.serie, elemento.telefono, elemento.equipo]
       .join(' ')
@@ -40,10 +59,7 @@ export default function Home() {
               {[
                 [
                   'Recibidos hoy',
-                  datos.ordenes.filter(
-                    (elemento) =>
-                      elemento.fecha.slice(0, 10) === new Date().toISOString().slice(0, 10),
-                  ).length,
+                  datos.ordenes.filter((elemento) => fechaDelTaller(elemento.fecha) === hoy).length,
                 ],
                 [
                   'En proceso',
@@ -113,37 +129,32 @@ export default function Home() {
           />
         </>
       )}
-      {esAdministrador && ['inicio', 'asignar', 'reportes', 'usuarios'].includes(seccion) && (
-        <Administracion {...propiedades} />
-      )}
+      {vistaAdministracion && <Administracion {...propiedades} />}
       {seccion === 'historial' && <Historial {...propiedades} />}
-      {['nueva', 'cotizaciones', 'entregas'].includes(seccion) && usuario.rol !== 'tecnico' && (
-        <Recepcion {...propiedades} />
+      {vistaRecepcion && <Recepcion {...propiedades} />}
+      {vistaTecnico && (
+        <>
+          <label className="selector-orden">
+            Orden de trabajo
+            <select
+              value={ordenSeleccionada}
+              onChange={(evento) => seleccionarOrden(evento.target.value)}
+            >
+              <option value="">Selecciona una orden</option>
+              {datos.ordenes.map((elemento) => (
+                <option key={elemento.id} value={elemento.id}>
+                  {elemento.folio} · {elemento.equipo}
+                </option>
+              ))}
+            </select>
+          </label>
+          {orden ? (
+            <Tecnico key={`${orden.id}-${seccion}`} {...propiedades} />
+          ) : (
+            <p className="vacio">Selecciona una orden asignada para continuar.</p>
+          )}
+        </>
       )}
-      {['diagnostico', 'piezas', 'cotizacion', 'reparacion'].includes(seccion) &&
-        usuario.rol === 'tecnico' && (
-          <>
-            <label className="selector-orden">
-              Orden de trabajo
-              <select
-                value={ordenSeleccionada}
-                onChange={(evento) => seleccionarOrden(evento.target.value)}
-              >
-                <option value="">Selecciona una orden</option>
-                {datos.ordenes.map((elemento) => (
-                  <option key={elemento.id} value={elemento.id}>
-                    {elemento.folio} · {elemento.equipo}
-                  </option>
-                ))}
-              </select>
-            </label>
-            {orden ? (
-              <Tecnico key={`${orden.id}-${seccion}`} {...propiedades} />
-            ) : (
-              <p className="vacio">Selecciona una orden asignada para continuar.</p>
-            )}
-          </>
-        )}
     </>
   );
 }

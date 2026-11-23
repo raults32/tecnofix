@@ -1,5 +1,6 @@
 import React from 'react';
 import { useOutletContext, useParams } from 'react-router';
+import BitacoraOrden from './components/BitacoraOrden.jsx';
 import { MONEDA, obtenerEstado } from './utils/vistaUtils.js';
 
 export default function Detalle() {
@@ -41,22 +42,45 @@ export default function Detalle() {
         <article>
           <h2>Seguimiento</h2>
           <div className="acciones">
-            <button onClick={() => manejarNavegar('cotizaciones')}>Cotización y aprobación</button>
-            <button onClick={() => manejarNavegar('entregas')}>Entrega y pago</button>
+            <button
+              disabled={!orden.esDiagnosticoConcluido}
+              title={
+                orden.esDiagnosticoConcluido
+                  ? undefined
+                  : 'Disponible cuando el técnico concluya el diagnóstico.'
+              }
+              onClick={() => manejarNavegar('cotizaciones')}
+            >
+              Cotización y aprobación
+            </button>
+            <button
+              disabled={!['LISTO', 'ENTREGADO'].includes(orden.estado)}
+              title={
+                ['LISTO', 'ENTREGADO'].includes(orden.estado)
+                  ? undefined
+                  : 'Disponible cuando la orden esté lista para entrega.'
+              }
+              onClick={() => manejarNavegar('entregas')}
+            >
+              Entrega y pago
+            </button>
             {esAdministrador && (
-              <button onClick={() => manejarNavegar('asignar')}>Asignar técnico</button>
+              <button
+                disabled={!['RECIBIDO', 'EN_DIAGNOSTICO', 'EN_REPARACION'].includes(orden.estado)}
+                title={
+                  ['RECIBIDO', 'EN_DIAGNOSTICO', 'EN_REPARACION'].includes(orden.estado)
+                    ? undefined
+                    : 'La orden ya no permite asignación de técnico.'
+                }
+                onClick={() => manejarNavegar('asignar')}
+              >
+                Asignar técnico
+              </button>
             )}
           </div>
         </article>
       </section>
-      <article className="bitacora">
-        <h2>Bitácora de la orden</h2>
-        {orden.historial.map((cambio, indice) => (
-          <p key={indice}>
-            {new Date(cambio.fecha).toLocaleString('es-MX')} · {cambio.usuario} ·{cambio.detalle}
-          </p>
-        ))}
-      </article>
+      <BitacoraOrden orden={orden} />
     </>
   );
 }

@@ -39,7 +39,14 @@ function Recepcion({
   const equipos = datos.equipos.filter((equipo) => equipo.idCliente === idCliente);
   const idEquipo = equipos.some((equipo) => equipo.id === equipoGuardado) ? equipoGuardado : '';
   const paso = Math.min(pasoGuardado, idEquipo ? 3 : idCliente ? 2 : 1);
-  const actual = datos.ordenes.find((elemento) => elemento.id === idSeleccion) || orden;
+  const ordenesDisponibles = datos.ordenes.filter((elemento) =>
+    seccion === 'cotizaciones'
+      ? elemento.esDiagnosticoConcluido
+      : ['LISTO', 'ENTREGADO'].includes(elemento.estado),
+  );
+  const actual =
+    ordenesDisponibles.find((elemento) => elemento.id === idSeleccion) ||
+    ordenesDisponibles.find((elemento) => elemento.id === orden?.id);
   const rutaActual = actual ? `ordenes/${actual.id}` : '';
   const pagoPendiente = actual && leerPagoPendiente(usuario.id, rutaActual);
   const pagado = pagosEnCentavos(actual);
@@ -112,7 +119,7 @@ function Recepcion({
       </div>
       <section className="tres-columnas">
         <article className={paso === 1 ? 'paso-actual' : ''}>
-          <h2>Cliente (UC01)</h2>
+          <h2>Cliente</h2>
           <label>
             Buscar cliente existente
             <select
@@ -158,7 +165,7 @@ function Recepcion({
           )}
         </article>
         <article className={paso === 2 ? 'paso-actual' : ''}>
-          <h2>Equipo (UC02)</h2>
+          <h2>Equipo</h2>
           {!idCliente ? (
             <p>Selecciona primero al cliente.</p>
           ) : (
@@ -203,7 +210,7 @@ function Recepcion({
           )}
         </article>
         <article className={paso === 3 ? 'paso-actual' : ''}>
-          <h2>Orden de servicio (UC03)</h2>
+          <h2>Orden de servicio</h2>
           {!idEquipo ? (
             <p>Selecciona un equipo para generar la orden.</p>
           ) : (
@@ -236,17 +243,11 @@ function Recepcion({
         Seleccionar orden
         <select value={actual?.id || ''} onChange={(evento) => setIdSeleccion(evento.target.value)}>
           <option value="">Seleccionar…</option>
-          {datos.ordenes
-            .filter((elemento) =>
-              seccion === 'cotizaciones'
-                ? elemento.esDiagnosticoConcluido
-                : ['LISTO', 'ENTREGADO'].includes(elemento.estado),
-            )
-            .map((elemento) => (
-              <option key={elemento.id} value={elemento.id}>
-                {elemento.folio} · {elemento.cliente}
-              </option>
-            ))}
+          {ordenesDisponibles.map((elemento) => (
+            <option key={elemento.id} value={elemento.id}>
+              {elemento.folio} · {elemento.cliente}
+            </option>
+          ))}
         </select>
       </label>
       {!actual ? (
@@ -346,7 +347,7 @@ function Recepcion({
             </button>
           </article>
           <form onSubmit={manejarPago} key={actual.id} aria-busy={bloqueado}>
-            <h2>Pago (UC19)</h2>
+            <h2>Pago</h2>
             <div className="columnas">
               <label>
                 Total del servicio

@@ -12,7 +12,7 @@ import { obtenerEstado } from '../utils/vistaUtils.js';
 function TablaOrdenes({ ordenes, manejarAbrir, tecnicos }) {
   return (
     <div className="tabla-contenedor">
-      <table>
+      <table className="tabla-ordenes">
         <thead>
           <tr>
             <th>Folio</th>

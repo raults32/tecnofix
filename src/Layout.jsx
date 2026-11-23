@@ -36,6 +36,7 @@ export default function Layout() {
     return destino === 'inicio' ? '/dashboard' : `/dashboard/${destino}${final}`;
   }
   function manejarNavegar(destino) {
+    if (orden) setSeleccion(orden.id);
     limpiarAviso();
     navegar(rutaDestino(destino));
   }
@@ -64,6 +65,7 @@ export default function Layout() {
     manejarNavegar,
     manejarAbrir,
     manejarError,
+    limpiarAviso,
     esAdministrador,
     busqueda,
     setBusqueda,
@@ -103,7 +105,7 @@ export default function Layout() {
           ))}
         </nav>
         <button className="cerrar-sesion" onClick={manejarSalir}>
-          Cerrar sesión <small>UC18</small>
+          Cerrar sesión
         </button>
       </aside>
       <div className="area-principal">

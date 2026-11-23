@@ -1,40 +1,57 @@
-// Nombre: Desarrollo asistido por Codex; revisiÃ³n pendiente del Equipo 5
-// Proyecto: Sistema de GestiÃ³n para Servicio TÃ©cnico de Computadoras
+// Nombre: Desarrollo asistido por Codex; revisión pendiente del Equipo 5
+// Proyecto: Sistema de Gestión para Servicio Técnico de Computadoras
 // Archivo: Administracion.jsx
-// DescripciÃ³n: Pantallas funcionales basadas en los prototipos TecnoFix.
+// Descripción: Pantallas funcionales basadas en los prototipos TecnoFix.
 // Fecha: 9 de noviembre de 2026
 
 /* Importaciones de presentación y consulta. */
 import React, { useEffect, useState } from 'react';
 import Formulario from '../components/Formulario.jsx';
 import { solicitar } from '../services/apiService.js';
+import { useTecnoFixStore } from '../store/tecnofix.js';
+import { fechaDelTaller } from '../utils/fechas.js';
 import { MONEDA, obtenerEstado, capturarFormulario } from '../utils/vistaUtils.js';
 
-/* Configuración inicial del periodo de reporte. */
-const HOY = new Date().toISOString().slice(0, 10);
+async function consultarUsuarios() {
+  const usuarios = await solicitar('usuarios');
+  if (!Array.isArray(usuarios)) throw new Error('No se pudo leer la lista de usuarios.');
+  return usuarios;
+}
 
 /** Presenta indicadores, asignación de carga, reportes y gestión de cuentas. */
-function Administracion({ datos, usuario, seccion, manejarOperacion, manejarError }) {
+function Administracion({ datos, usuario, seccion, manejarOperacion, manejarError, limpiarAviso }) {
   /* Estado de reportes y edición de cuentas. */
   const [usuarios, setUsuarios] = useState([]);
   const [cuentaSeleccionada, setCuentaSeleccionada] = useState(null);
   const [esNuevoUsuario, setEsNuevoUsuario] = useState(false);
   const [reporte, setReporte] = useState(null);
+  const [consultandoReporte, setConsultandoReporte] = useState(false);
   const [tipoReporte, setTipoReporte] = useState('Órdenes');
+  const bloqueado = useTecnoFixStore((state) => state.enviando || state.datosDesactualizados);
 
   /* Consulta de cuentas solo dentro de su pantalla autorizada. */
   useEffect(() => {
     if (seccion === 'usuarios') {
-      solicitar('usuarios').then(setUsuarios).catch(manejarError);
+      let vigente = true;
+      consultarUsuarios()
+        .then((resultado) => {
+          if (vigente) setUsuarios(resultado);
+        })
+        .catch((error) => {
+          if (vigente) manejarError(error);
+        });
+      return () => {
+        vigente = false;
+      };
     }
-  }, [seccion]);
+  }, [seccion, manejarError]);
 
   /* Operaciones administrativas con actualización de las listas. */
   const manejarUsuarios = async (valores) => {
     const ruta = cuentaSeleccionada ? `usuarios/${cuentaSeleccionada.id}` : 'usuarios';
     if (await manejarOperacion(ruta, valores)) {
       try {
-        setUsuarios(await solicitar('usuarios'));
+        setUsuarios(await consultarUsuarios());
         setCuentaSeleccionada(null);
         setEsNuevoUsuario(false);
       } catch (error) {
@@ -44,29 +61,47 @@ function Administracion({ datos, usuario, seccion, manejarOperacion, manejarErro
   };
   const manejarReporte = async (evento) => {
     const valores = capturarFormulario(evento);
+    if (consultandoReporte) return;
+    setReporte(null);
+    setConsultandoReporte(true);
+    limpiarAviso();
     try {
-      setReporte(await solicitar(`reportes?${new URLSearchParams(valores)}`));
+      const resultado = await solicitar(`reportes?${new URLSearchParams(valores)}`);
+      if (!resultado.estados || !Array.isArray(resultado.productividad)) {
+        throw new Error('No se pudo leer el reporte del periodo.');
+      }
+      setReporte(resultado);
     } catch (error) {
       manejarError(error);
+    } finally {
+      setConsultandoReporte(false);
     }
   };
   const manejarAsignar = (evento, orden) => {
     const valores = capturarFormulario(evento);
     manejarOperacion(`ordenes/${orden.id}`, { accion: 'asignar', ...valores });
   };
-  const mesActual = HOY.slice(0, 7);
-  const mensuales = datos.ordenes.filter((orden) => orden.fecha.startsWith(mesActual));
+  const hoy = fechaDelTaller();
+  const mesActual = hoy.slice(0, 7);
+  const mensuales = datos.ordenes.filter((orden) =>
+    fechaDelTaller(orden.fecha).startsWith(mesActual),
+  );
   const concluidas = mensuales.filter((orden) => ['LISTO', 'ENTREGADO'].includes(orden.estado));
   const ingresos = concluidas.reduce((total, orden) => total + orden.total, 0);
   const gastos = concluidas.reduce((total, orden) => total + (orden.costoRefacciones || 0), 0);
   const semanales = [0, 1, 2, 3].map((semana) =>
     mensuales
       .filter(
-        (orden) => Math.min(3, Math.floor((Number(orden.fecha.slice(8, 10)) - 1) / 7)) === semana,
+        (orden) =>
+          Math.min(3, Math.floor((Number(fechaDelTaller(orden.fecha).slice(8, 10)) - 1) / 7)) ===
+          semana,
       )
       .reduce((total, orden) => total + (orden.costoRefacciones || 0), 0),
   );
   const maximo = Math.max(...semanales, 1);
+  const ordenesAsignables = datos.ordenes.filter((orden) =>
+    ['RECIBIDO', 'EN_DIAGNOSTICO', 'EN_REPARACION'].includes(orden.estado),
+  );
   const camposUsuario = [
     { nombre: 'nombre', etiqueta: 'Nombre', valor: cuentaSeleccionada?.nombre },
     { nombre: 'usuario', etiqueta: 'Usuario', valor: cuentaSeleccionada?.usuario },
@@ -181,58 +216,51 @@ function Administracion({ datos, usuario, seccion, manejarOperacion, manejarErro
             </tr>
           </thead>
           <tbody>
-            {datos.ordenes
-              .filter((orden) =>
-                ['RECIBIDO', 'EN_DIAGNOSTICO', 'EN_REPARACION'].includes(orden.estado),
-              )
-              .map((orden) => (
-                <tr key={orden.id}>
-                  <td>
-                    <strong>{orden.folio}</strong>
-                  </td>
-                  <td>{orden.equipo}</td>
-                  <td>{orden.falla}</td>
-                  <td>
-                    <span className="estado">
-                      {orden.idTecnico ? obtenerEstado(orden) : 'Sin asignar'}
-                    </span>
-                  </td>
-                  <td>
-                    <form
-                      className="asignacion"
-                      onSubmit={(evento) => manejarAsignar(evento, orden)}
+            {ordenesAsignables.map((orden) => (
+              <tr key={orden.id}>
+                <td>
+                  <strong>{orden.folio}</strong>
+                </td>
+                <td>{orden.equipo}</td>
+                <td>{orden.falla}</td>
+                <td>
+                  <span className="estado">
+                    {orden.idTecnico ? obtenerEstado(orden) : 'Sin asignar'}
+                  </span>
+                </td>
+                <td>
+                  <form className="asignacion" onSubmit={(evento) => manejarAsignar(evento, orden)}>
+                    <select
+                      name="idTecnico"
+                      required
+                      aria-label={`Técnico para ${orden.folio}`}
+                      defaultValue={orden.idTecnico || ''}
                     >
-                      <select
-                        name="idTecnico"
+                      <option value="">Elegir…</option>
+                      {datos.tecnicos.map((tecnico) => (
+                        <option key={tecnico.id} value={tecnico.id}>
+                          {tecnico.nombre}
+                        </option>
+                      ))}
+                    </select>
+                    {orden.idTecnico && (
+                      <input
+                        name="descripcion"
                         required
-                        aria-label={`Técnico para ${orden.folio}`}
-                        defaultValue={orden.idTecnico || ''}
-                      >
-                        <option value="">Elegir…</option>
-                        {datos.tecnicos.map((tecnico) => (
-                          <option key={tecnico.id} value={tecnico.id}>
-                            {tecnico.nombre}
-                          </option>
-                        ))}
-                      </select>
-                      {orden.idTecnico && (
-                        <input
-                          name="descripcion"
-                          required
-                          placeholder="Motivo de reasignación"
-                          aria-label="Motivo de reasignación"
-                        />
-                      )}
-                      <button className="secundario">
-                        {orden.idTecnico ? 'Reasignar' : 'Asignar'}
-                      </button>
-                    </form>
-                  </td>
-                </tr>
-              ))}
+                        placeholder="Motivo de reasignación"
+                        aria-label="Motivo de reasignación"
+                      />
+                    )}
+                    <button className="secundario" disabled={bloqueado}>
+                      {orden.idTecnico ? 'Reasignar' : 'Asignar'}
+                    </button>
+                  </form>
+                </td>
+              </tr>
+            ))}
           </tbody>
         </table>
-        {!datos.ordenes.length && <p className="vacio">No hay órdenes para asignar.</p>}
+        {!ordenesAsignables.length && <p className="vacio">No hay órdenes para asignar.</p>}
       </div>
       <h2>Carga actual de técnicos</h2>
       <section className="tres-columnas">
@@ -374,44 +402,51 @@ function Administracion({ datos, usuario, seccion, manejarOperacion, manejarErro
                   </tbody>
                 </table>
               )}
-              {['Ingresos', 'Gastos'].includes(tipoReporte) && (
-                <table>
-                  <thead>
-                    <tr>
-                      <th>Fecha</th>
-                      <th>Orden</th>
-                      <th>Concepto</th>
-                      <th>Importe</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {datos.ordenes
-                      .filter(
-                        (orden) =>
-                          orden.fecha.slice(0, 10) >= reporte.inicio &&
-                          orden.fecha.slice(0, 10) <= reporte.fin &&
-                          (tipoReporte === 'Gastos' ||
-                            ['LISTO', 'ENTREGADO'].includes(orden.estado)),
-                      )
-                      .map((orden) => (
-                        <tr key={orden.id}>
-                          <td>{orden.fecha.slice(0, 10)}</td>
-                          <td>{orden.folio}</td>
-                          <td>
-                            {tipoReporte === 'Gastos'
-                              ? orden.refacciones || 'Sin piezas'
-                              : 'Servicio técnico'}
-                          </td>
-                          <td>
-                            {MONEDA.format(
-                              tipoReporte === 'Gastos' ? orden.costoRefacciones || 0 : orden.total,
-                            )}
-                          </td>
+              {['Ingresos', 'Gastos'].includes(tipoReporte) &&
+                (() => {
+                  const ordenesPeriodo = datos.ordenes.filter((orden) => {
+                    const fecha = fechaDelTaller(orden.fecha);
+                    return (
+                      fecha >= reporte.inicio &&
+                      fecha <= reporte.fin &&
+                      (tipoReporte === 'Gastos' || ['LISTO', 'ENTREGADO'].includes(orden.estado))
+                    );
+                  });
+                  return ordenesPeriodo.length ? (
+                    <table>
+                      <thead>
+                        <tr>
+                          <th>Fecha</th>
+                          <th>Orden</th>
+                          <th>Concepto</th>
+                          <th>Importe</th>
                         </tr>
-                      ))}
-                  </tbody>
-                </table>
-              )}
+                      </thead>
+                      <tbody>
+                        {ordenesPeriodo.map((orden) => (
+                          <tr key={orden.id}>
+                            <td>{fechaDelTaller(orden.fecha)}</td>
+                            <td>{orden.folio}</td>
+                            <td>
+                              {tipoReporte === 'Gastos'
+                                ? orden.refacciones || 'Sin piezas'
+                                : 'Servicio técnico'}
+                            </td>
+                            <td>
+                              {MONEDA.format(
+                                tipoReporte === 'Gastos'
+                                  ? orden.costoRefacciones || 0
+                                  : orden.total,
+                              )}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  ) : (
+                    <p className="vacio">No hay registros en este periodo.</p>
+                  );
+                })()}
               {tipoReporte === 'Productividad' && (
                 <table>
                   <thead>
@@ -438,23 +473,37 @@ function Administracion({ datos, usuario, seccion, manejarOperacion, manejarErro
             </>
           )}
         </div>
-        <form onSubmit={manejarReporte}>
-          <h2>Periodo y exportación (UC12)</h2>
+        <form
+          onSubmit={manejarReporte}
+          onChange={() => setReporte(null)}
+          aria-busy={consultandoReporte}
+        >
+          <h2>Periodo y exportación</h2>
           <label>
             Desde
             <input
               name="inicio"
               type="date"
-              defaultValue={`${HOY.slice(0, 7)}-01`}
+              defaultValue={`${mesActual}-01`}
               required
-              max={HOY}
+              max={hoy}
+              disabled={consultandoReporte}
             />
           </label>
           <label>
             Hasta
-            <input name="fin" type="date" defaultValue={HOY} required max={HOY} />
+            <input
+              name="fin"
+              type="date"
+              defaultValue={hoy}
+              required
+              max={hoy}
+              disabled={consultandoReporte}
+            />
           </label>
-          <button>Consultar reporte</button>
+          <button disabled={consultandoReporte}>
+            {consultandoReporte ? 'Consultando…' : 'Consultar reporte'}
+          </button>
           {reporte && (
             <a
               className="boton secundario"

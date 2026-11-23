@@ -1,10 +1,10 @@
 import React from 'react';
 import { Link } from 'react-router';
 
-export default function NotFound() {
+export default function NotFound({ titulo = 'No encontramos esa pantalla' }) {
   return (
     <section>
-      <h2>No encontramos esa pantalla</h2>
+      <h2>{titulo}</h2>
       <Link to="/dashboard">Volver al inicio de TecnoFix</Link>
     </section>
   );

@@ -78,7 +78,7 @@ export const useTecnoFixStore = create((set, get) => ({
       try {
         set({
           datos: await consultarDatos(),
-          mensaje: 'Operación completada correctamente.',
+          mensaje: ruta === 'login' ? '' : 'Operación completada correctamente.',
           esError: false,
         });
       } catch {
