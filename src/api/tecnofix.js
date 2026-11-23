@@ -31,7 +31,7 @@ export async function solicitar(ruta, metodo = 'GET', datos) {
     error.estado = respuesta.status;
     throw error;
   }
-  if (!resultado || typeof resultado !== 'object' || Array.isArray(resultado)) {
+  if (!resultado || typeof resultado !== 'object') {
     throw new Error('El servidor dio una respuesta inesperada. Intenta de nuevo.');
   }
   return resultado;

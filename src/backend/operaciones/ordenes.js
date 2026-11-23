@@ -2,9 +2,16 @@ import { randomUUID } from 'node:crypto';
 import { validarTransicion, calcularCosto, pagosEnCentavos } from '../../utils/ordenUtils.js';
 import { exigir, requerir } from '../validaciones.js';
 
-/** Registra fecha y usuario de cada modificación de una orden. */
-function registrarCambio(orden, usuario, detalle) {
-  orden.historial.push({ fecha: new Date().toISOString(), usuario: usuario.nombre, detalle });
+/** Guarda la acción y sus datos después de que pasa la validación. */
+function registrarCambio(orden, usuario, tipo, campos = {}) {
+  if (!Array.isArray(orden.historial)) orden.historial = [];
+  orden.historial.push({
+    tipo,
+    fecha: new Date().toISOString(),
+    usuario: usuario.nombre,
+    rol: usuario.rol,
+    ...campos,
+  });
 }
 
 export function crearOrden(base, datos, usuario, esRecepcion) {
@@ -31,7 +38,7 @@ export function crearOrden(base, datos, usuario, esRecepcion) {
     historial: [],
     total: 0,
   };
-  registrarCambio(orden, usuario, 'Recepción del equipo');
+  registrarCambio(orden, usuario, 'recepcion', { fecha: orden.fecha });
   base.ordenes.unshift(orden);
 }
 
@@ -59,28 +66,43 @@ export function actualizarOrden(base, id, datos, usuario, { esRecepcion, esAdmin
     }
   }
   exigir(!['ENTREGADO', 'CANCELADO'].includes(orden.estado), 'La orden ya está cerrada.');
+  let tipo = datos.accion;
+  let campos;
   if (datos.accion === 'asignar') {
-    asignarTecnico(base, orden, datos, esRecepcion, esAdministrador);
+    if (orden.idTecnico) tipo = 'reasignar';
+    const tecnico = asignarTecnico(base, orden, datos, esRecepcion, esAdministrador);
+    campos = {
+      tecnico: tecnico.nombre,
+      ...(tipo === 'reasignar' && { detalle: datos.descripcion }),
+    };
   } else if (datos.accion === 'estado') {
     cambiarEstado(orden, datos, usuario);
+    campos = { estado: orden.estado };
+    if (orden.estado === 'CANCELADO') campos.detalle = datos.descripcion;
+    if (orden.estado === 'ENTREGADO')
+      campos.detalle = 'Devolución del equipo y accesorios confirmada.';
   } else if (datos.accion === 'piezas') {
     guardarPiezas(orden, datos, usuario, esAdministrador);
+    campos = { partidas: orden.piezas.length, total: orden.total };
   } else if (datos.accion === 'enviarCotizacion') {
-    enviarCotizacion(orden, usuario, esAdministrador);
+    if (enviarCotizacion(orden, usuario, esAdministrador) === false) return false;
   } else if (datos.accion === 'pago') {
-    registrarPago(orden, datos, usuario, esRecepcion);
+    const { monto, metodo, fecha } = registrarPago(orden, datos, usuario, esRecepcion);
+    campos = { monto, metodo, fecha };
   } else if (datos.accion === 'autorizar') {
     registrarAutorizacion(orden, datos, esRecepcion);
+    campos = {
+      decision: orden.decision,
+      detalle: datos.descripcion,
+      ...(orden.medioAutorizacion && { medio: orden.medioAutorizacion }),
+    };
   } else if (['diagnostico', 'reparacion'].includes(datos.accion)) {
     registrarDiagnosticoOReparacion(orden, datos, usuario, esAdministrador);
+    campos = { detalle: datos.descripcion };
   } else {
     throw new Error('Seleccione una operación válida.');
   }
-  registrarCambio(
-    orden,
-    usuario,
-    `${datos.accion}: ${datos.estado || ''} ${datos.descripcion || ''}`,
-  );
+  registrarCambio(orden, usuario, tipo, campos);
 }
 
 function asignarTecnico(base, orden, datos, esRecepcion, esAdministrador) {
@@ -92,16 +114,16 @@ function asignarTecnico(base, orden, datos, esRecepcion, esAdministrador) {
     ['RECIBIDO', 'EN_DIAGNOSTICO', 'EN_REPARACION'].includes(orden.estado),
     'La orden no permite asignación.',
   );
-  exigir(
-    base.usuarios.some(
-      (cuenta) => cuenta.id === datos.idTecnico && cuenta.rol === 'tecnico' && cuenta.esActivo,
-    ),
-    'Técnico inválido.',
+  const tecnico = base.usuarios.find(
+    (cuenta) => cuenta.id === datos.idTecnico && cuenta.rol === 'tecnico' && cuenta.esActivo,
   );
+  exigir(tecnico, 'Técnico inválido.');
+  exigir(orden.idTecnico !== tecnico.id, 'La orden ya está asignada a ese técnico.');
   if (orden.idTecnico) {
     requerir(datos, ['descripcion']);
   }
   orden.idTecnico = datos.idTecnico;
+  return tecnico;
 }
 
 function cambiarEstado(orden, datos, usuario) {
@@ -131,7 +153,7 @@ function guardarPiezas(orden, datos, usuario, esAdministrador) {
   exigir(Array.isArray(datos.piezas) && datos.piezas.length <= 50, 'Partidas inválidas.');
   const piezas = datos.piezas.map((pieza) => {
     exigir(
-      typeof pieza.nombre === 'string' &&
+      typeof pieza?.nombre === 'string' &&
         pieza.nombre.trim().length > 0 &&
         pieza.nombre.length <= 100,
       'Nombre de pieza inválido.',
@@ -169,6 +191,7 @@ function enviarCotizacion(orden, usuario, esAdministrador) {
     orden.estado === 'EN_DIAGNOSTICO' && orden.esDiagnosticoConcluido,
     'Primero concluya el diagnóstico.',
   );
+  if (orden.esCotizacionEnviada) return false;
   orden.esCotizacionEnviada = true;
 }
 
@@ -185,16 +208,15 @@ function registrarPago(orden, datos, usuario, esRecepcion) {
     'Monto inválido o mayor al saldo.',
   );
   exigir(['Efectivo', 'Tarjeta', 'Transferencia'].includes(datos.metodo), 'Método inválido.');
-  orden.pagos = [
-    ...(orden.pagos || []),
-    {
-      monto: centavos / 100,
-      metodo: datos.metodo,
-      idOperacion: datos.idOperacion,
-      fecha: new Date().toISOString(),
-      usuario: usuario.nombre,
-    },
-  ];
+  const pago = {
+    monto: centavos / 100,
+    metodo: datos.metodo,
+    idOperacion: datos.idOperacion,
+    fecha: new Date().toISOString(),
+    usuario: usuario.nombre,
+  };
+  orden.pagos = [...(orden.pagos || []), pago];
+  return pago;
 }
 
 function registrarAutorizacion(orden, datos, esRecepcion) {
@@ -203,12 +225,11 @@ function registrarAutorizacion(orden, datos, esRecepcion) {
     'Recepción registra la autorización después del diagnóstico.',
   );
   requerir(datos, ['descripcion']);
-  exigir(
-    ['aprobada', 'rechazada', 'pendiente'].includes(datos.decision || 'aprobada'),
-    'Decisión inválida.',
-  );
-  orden.decision = datos.decision || 'aprobada';
-  orden.medioAutorizacion = String(datos.medio || '').slice(0, 100);
+  const { decision = 'aprobada', medio = '' } = datos;
+  exigir(['aprobada', 'rechazada', 'pendiente'].includes(decision), 'Decisión inválida.');
+  exigir(typeof medio === 'string' && medio.length <= 100, 'Medio de confirmación inválido.');
+  orden.decision = decision;
+  orden.medioAutorizacion = medio.trim();
   orden.tieneAutorizacion = orden.decision === 'aprobada';
 }
 

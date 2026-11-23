@@ -10,7 +10,7 @@ export function requerir(datos, campos) {
   for (const campo of campos) {
     exigir(
       typeof datos[campo] === 'string' &&
-        datos[campo].trim().length > 0 &&
+        datos[campo].replace(/\p{Cf}/gu, '').trim().length > 0 &&
         datos[campo].length <= 1000,
       `Campo obligatorio o inválido: ${campo}.`,
     );

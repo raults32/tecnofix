@@ -6,11 +6,11 @@
 
 /* Importaciones del servidor y reglas compartidas. */
 import http from 'node:http';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { resolve, extname } from 'node:path';
 import { guardar, inicializarBase, leerBase } from './backend/base.js';
-import { crearCotizacionPdf } from './backend/documentos/pdf.js';
-import { crearReportePdf, generarReporte } from './backend/documentos/reportes.js';
+import { crearCotizacionPdf, crearReportePdf } from './backend/documentos/pdf.js';
+import { generarReporte } from './backend/documentos/reportes.js';
 import {
   actualizarOrden,
   buscarOrdenDisponible,
@@ -56,6 +56,7 @@ const SERVIDOR = http.createServer({ requestTimeout: 15000 }, async (peticion, r
     respuesta.writeHead(200, {
       'Content-Type': 'application/pdf',
       'Content-Disposition': `inline; filename="${nombre}"`,
+      'Cache-Control': 'no-store',
     });
     respuesta.end(contenido);
   };
@@ -64,13 +65,32 @@ const SERVIDOR = http.createServer({ requestTimeout: 15000 }, async (peticion, r
     const ruta = url.pathname;
     if (!ruta.startsWith('/api/')) {
       // Las rutas de React deben abrir también al recargar o pegar la URL.
-      const esPagina = ruta === '/' || ruta === '/dashboard' || ruta.startsWith('/dashboard/');
-      const archivo = resolve('dist', esPagina ? 'index.html' : `.${ruta}`);
+      const carpetaDist = resolve('dist');
+      const esRecurso = Boolean(extname(ruta));
+      const archivo = resolve(carpetaDist, esRecurso ? `.${ruta}` : 'index.html');
       exigir(
-        archivo.startsWith(resolve('dist') + '\\') || archivo.startsWith(resolve('dist') + '/'),
+        archivo.startsWith(carpetaDist + '\\') || archivo.startsWith(carpetaDist + '/'),
         'Ruta inválida.',
       );
-      const tipos = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css' };
+      if (esRecurso && !existsSync(archivo)) {
+        respuesta.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
+        respuesta.end('Recurso no encontrado.');
+        return;
+      }
+      if (!existsSync(archivo)) {
+        throw Object.assign(
+          new Error('La aplicación compilada no está disponible. Ejecuta npm run build.'),
+          { estado: 503 },
+        );
+      }
+      const tipos = {
+        '.html': 'text/html; charset=utf-8',
+        '.js': 'text/javascript; charset=utf-8',
+        '.css': 'text/css; charset=utf-8',
+        '.svg': 'image/svg+xml',
+        '.png': 'image/png',
+        '.ico': 'image/x-icon',
+      };
       const contenido = readFileSync(archivo);
       respuesta.writeHead(200, {
         'Content-Type': tipos[extname(archivo)] || 'application/octet-stream',
@@ -146,7 +166,10 @@ const SERVIDOR = http.createServer({ requestTimeout: 15000 }, async (peticion, r
       exigir(esAdministrador, 'Solo Administración puede consultar reportes.');
       const reporte = generarReporte(base, url.searchParams);
       if (ruta.endsWith('.pdf')) {
-        enviarPdf(crearReportePdf(reporte, usuario));
+        enviarPdf(
+          crearReportePdf(reporte, usuario),
+          `reporte-${reporte.inicio}-${reporte.fin}.pdf`,
+        );
       } else {
         enviar(reporte);
       }
