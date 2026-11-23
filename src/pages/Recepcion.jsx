@@ -1,44 +1,21 @@
 // Nombre: Desarrollo asistido por Codex; revisión pendiente del Equipo 5
 // Proyecto: Sistema de Gestión para Servicio Técnico de Computadoras
 // Archivo: Recepcion.jsx
-// Descripción: Pantallas funcionales basadas en los prototipos TecnoFix.
+// Descripción: Distribuye las pantallas de Recepción por etapa del servicio.
 // Fecha: 9 de noviembre de 2026
 
-/* Importaciones de presentación y captura. */
-import React, { useEffect, useState } from 'react';
-import Formulario from '../components/Formulario.jsx';
-import { leerPagoPendiente } from '../store/pagosPendientes.js';
-import { useTecnoFixStore } from '../store/tecnofix.js';
-import { guardarEnSesion, leerEnSesion } from '../utils/almacenSesion.js';
-import { pagosEnCentavos } from '../utils/ordenUtils.js';
-import { capturarFormulario, MONEDA, obtenerEstado } from '../utils/vistaUtils.js';
+import React, { useState } from 'react';
+import CotizacionesRecepcion from './recepcion/CotizacionesRecepcion.jsx';
+import EntregasRecepcion from './recepcion/EntregasRecepcion.jsx';
+import NuevaRecepcion from './recepcion/NuevaRecepcion.jsx';
 
 /** Implementa recepción por pasos, aprobación de cotizaciones y entrega con pagos. */
-function Recepcion({
-  datos,
-  orden,
-  seccion,
-  usuario,
-  manejarOperacion,
-  manejarNavegar,
-  manejarAbrir,
-}) {
-  /* Selecciones de registros existentes y etapa del ingreso. */
-  const claveBorrador = `tecnofix:borrador:${usuario.id}:recepcion`;
-  const [borrador] = useState(() => leerEnSesion(claveBorrador) || {});
-  const [pasoGuardado, setPaso] = useState(borrador.paso || 1);
-  const [clienteGuardado, setIdCliente] = useState(borrador.idCliente || '');
-  const [equipoGuardado, setIdEquipo] = useState(borrador.idEquipo || '');
-  const [esNuevoCliente, setEsNuevoCliente] = useState(Boolean(borrador.esNuevoCliente));
-  const [esNuevoEquipo, setEsNuevoEquipo] = useState(Boolean(borrador.esNuevoEquipo));
+export default function Recepcion(propiedades) {
+  const { datos, orden, seccion, usuario, manejarOperacion, manejarAbrir } = propiedades;
   const [idSeleccion, setIdSeleccion] = useState('');
-  const bloqueado = useTecnoFixStore((state) => state.enviando || state.datosDesactualizados);
-  const idCliente = datos.clientes.some((cliente) => cliente.id === clienteGuardado)
-    ? clienteGuardado
-    : '';
-  const equipos = datos.equipos.filter((equipo) => equipo.idCliente === idCliente);
-  const idEquipo = equipos.some((equipo) => equipo.id === equipoGuardado) ? equipoGuardado : '';
-  const paso = Math.min(pasoGuardado, idEquipo ? 3 : idCliente ? 2 : 1);
+
+  if (seccion === 'nueva') return <NuevaRecepcion {...propiedades} />;
+
   const ordenesDisponibles = datos.ordenes.filter((elemento) =>
     seccion === 'cotizaciones'
       ? elemento.esDiagnosticoConcluido
@@ -47,197 +24,8 @@ function Recepcion({
   const actual =
     ordenesDisponibles.find((elemento) => elemento.id === idSeleccion) ||
     ordenesDisponibles.find((elemento) => elemento.id === orden?.id);
-  const rutaActual = actual ? `ordenes/${actual.id}` : '';
-  const pagoPendiente = actual && leerPagoPendiente(usuario.id, rutaActual);
-  const pagado = pagosEnCentavos(actual);
-  const saldo = Math.max(0, Math.round((actual?.total || 0) * 100) - pagado) / 100;
 
-  useEffect(() => {
-    if (seccion === 'nueva') {
-      guardarEnSesion(claveBorrador, {
-        paso: pasoGuardado,
-        idCliente: clienteGuardado,
-        idEquipo: equipoGuardado,
-        esNuevoCliente,
-        esNuevoEquipo,
-      });
-    }
-  }, [
-    seccion,
-    claveBorrador,
-    pasoGuardado,
-    clienteGuardado,
-    equipoGuardado,
-    esNuevoCliente,
-    esNuevoEquipo,
-  ]);
-
-  const manejarCrear = async (ruta, valores, formulario) => {
-    if (!(await manejarOperacion(ruta, valores, formulario))) return false;
-    if (ruta === 'clientes') {
-      setEsNuevoCliente(false);
-    } else if (ruta === 'equipos') {
-      setEsNuevoEquipo(false);
-    } else {
-      guardarEnSesion(claveBorrador, null);
-      setPaso(1);
-      setIdCliente('');
-      setIdEquipo('');
-      manejarNavegar('inicio');
-    }
-    return true;
-  };
-  const manejarDecision = (evento) => {
-    const valores = capturarFormulario(evento);
-    manejarOperacion(`ordenes/${actual.id}`, { accion: 'autorizar', ...valores });
-  };
-  const manejarPago = async (evento) => {
-    const formulario = evento.currentTarget;
-    const valores = capturarFormulario(evento);
-    if (await manejarOperacion(rutaActual, { accion: 'pago', ...valores })) {
-      formulario.elements.monto.value = '';
-    }
-  };
-  const opcionesClientes = datos.clientes.map((cliente) => ({
-    valor: cliente.id,
-    texto: `${cliente.nombre} · ${cliente.telefono}`,
-  }));
-
-  return seccion === 'nueva' ? (
-    <>
-      <div className="pasos">
-        {['Cliente', 'Equipo', 'Orden'].map((nombre, indice) => (
-          <button
-            key={nombre}
-            className={paso === indice + 1 ? 'activo' : 'secundario'}
-            disabled={(indice > 0 && !idCliente) || (indice === 2 && !idEquipo)}
-            onClick={() => setPaso(indice + 1)}
-          >
-            {indice + 1} {nombre}
-          </button>
-        ))}
-      </div>
-      <section className="tres-columnas">
-        <article className={paso === 1 ? 'paso-actual' : ''}>
-          <h2>Cliente</h2>
-          <label>
-            Buscar cliente existente
-            <select
-              value={idCliente}
-              onChange={(evento) => {
-                setIdCliente(evento.target.value);
-                setIdEquipo('');
-              }}
-            >
-              <option value="">Teléfono o nombre</option>
-              {opcionesClientes.map((opcion) => (
-                <option key={opcion.valor} value={opcion.valor}>
-                  {opcion.texto}
-                </option>
-              ))}
-            </select>
-          </label>
-          <button className="enlace" onClick={() => setEsNuevoCliente(!esNuevoCliente)}>
-            ¿No aparece? Registrar nuevo
-          </button>
-          {esNuevoCliente && (
-            <Formulario
-              titulo="Nuevo cliente"
-              claveBorrador={`${claveBorrador}:cliente`}
-              campos={[
-                { nombre: 'nombre', etiqueta: 'Nombre completo' },
-                {
-                  nombre: 'telefono',
-                  etiqueta: 'Teléfono (10 dígitos)',
-                  tipo: 'tel',
-                  patron: '[0-9]{10}',
-                  ayuda: 'Escribe 10 dígitos sin espacios.',
-                },
-                { nombre: 'correo', etiqueta: 'Correo', tipo: 'email' },
-              ]}
-              manejarEnvio={(valores, formulario) => manejarCrear('clientes', valores, formulario)}
-            />
-          )}
-          {idCliente && (
-            <button className="secundario" onClick={() => setPaso(2)}>
-              Continuar a equipo
-            </button>
-          )}
-        </article>
-        <article className={paso === 2 ? 'paso-actual' : ''}>
-          <h2>Equipo</h2>
-          {!idCliente ? (
-            <p>Selecciona primero al cliente.</p>
-          ) : (
-            <>
-              <label>
-                Equipo existente
-                <select value={idEquipo} onChange={(evento) => setIdEquipo(evento.target.value)}>
-                  <option value="">Seleccionar equipo</option>
-                  {equipos.map((equipo) => (
-                    <option key={equipo.id} value={equipo.id}>
-                      {equipo.marca} {equipo.modelo} · {equipo.serie}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <button className="enlace" onClick={() => setEsNuevoEquipo(!esNuevoEquipo)}>
-                Registrar nuevo equipo
-              </button>
-              {esNuevoEquipo && (
-                <Formulario
-                  key={idCliente}
-                  claveBorrador={`${claveBorrador}:equipo:${idCliente}`}
-                  titulo="Nuevo equipo"
-                  campos={[
-                    { nombre: 'marca', etiqueta: 'Marca' },
-                    { nombre: 'modelo', etiqueta: 'Modelo' },
-                    { nombre: 'serie', etiqueta: 'Número de serie' },
-                    { nombre: 'especificaciones', etiqueta: 'Tipo y especificaciones' },
-                  ]}
-                  manejarEnvio={(valores, formulario) =>
-                    manejarCrear('equipos', { ...valores, idCliente }, formulario)
-                  }
-                />
-              )}
-              <small>Si el equipo ya existe se vincula a su historial.</small>
-              {idEquipo && (
-                <button className="secundario" onClick={() => setPaso(3)}>
-                  Continuar a orden
-                </button>
-              )}
-            </>
-          )}
-        </article>
-        <article className={paso === 3 ? 'paso-actual' : ''}>
-          <h2>Orden de servicio</h2>
-          {!idEquipo ? (
-            <p>Selecciona un equipo para generar la orden.</p>
-          ) : (
-            <Formulario
-              key={idEquipo}
-              claveBorrador={`${claveBorrador}:orden:${idEquipo}`}
-              titulo=""
-              etiqueta="Generar orden"
-              campos={[
-                {
-                  nombre: 'falla',
-                  etiqueta: 'Falla reportada',
-                  placeholder: 'Describe el problema…',
-                },
-                { nombre: 'estadoFisico', etiqueta: 'Estado físico (golpes, pantalla…)' },
-                { nombre: 'accesorios', etiqueta: 'Accesorios incluidos (o ninguno)' },
-              ]}
-              manejarEnvio={(valores, formulario) =>
-                manejarCrear('ordenes', { ...valores, idEquipo }, formulario)
-              }
-            />
-          )}
-          <small>Se genera un folio único y se conserva la bitácora.</small>
-        </article>
-      </section>
-    </>
-  ) : (
+  return (
     <>
       <label className="selector-orden">
         Seleccionar orden
@@ -253,186 +41,15 @@ function Recepcion({
       {!actual ? (
         <p className="vacio">Selecciona una orden disponible para continuar.</p>
       ) : seccion === 'cotizaciones' ? (
-        <section className="columnas cotizacion-recepcion">
-          <div>
-            <h2>Cotización recibida del técnico · {actual.folio}</h2>
-            <table>
-              <thead>
-                <tr>
-                  <th>Concepto</th>
-                  <th>Cant.</th>
-                  <th>Importe</th>
-                </tr>
-              </thead>
-              <tbody>
-                {(actual.piezas || []).map((pieza, indice) => (
-                  <tr key={indice}>
-                    <td>{pieza.nombre}</td>
-                    <td>{pieza.cantidad}</td>
-                    <td>{MONEDA.format(pieza.cantidad * pieza.costo)}</td>
-                  </tr>
-                ))}
-                <tr>
-                  <td>Mano de obra</td>
-                  <td>1</td>
-                  <td>{MONEDA.format(actual.manoObra || 0)}</td>
-                </tr>
-              </tbody>
-            </table>
-            <div className="total">
-              Total <strong>{MONEDA.format(actual.total || 0)}</strong>
-            </div>
-            <a
-              className="boton secundario"
-              href={`/api/cotizacion/${actual.id}`}
-              target="_blank"
-              rel="noreferrer"
-            >
-              Ver PDF
-            </a>
-          </div>
-          <form onSubmit={manejarDecision}>
-            <h2>Registrar decisión del cliente</h2>
-            {['aprobada', 'rechazada', 'pendiente'].map((decision) => (
-              <label className="opcion" key={decision}>
-                <input
-                  type="radio"
-                  name="decision"
-                  value={decision}
-                  defaultChecked={decision === 'aprobada'}
-                />
-                {decision}
-              </label>
-            ))}
-            <label>
-              Medio de confirmación
-              <select name="medio">
-                <option>WhatsApp</option>
-                <option>Teléfono</option>
-                <option>Presencial</option>
-                <option>Correo</option>
-              </select>
-            </label>
-            <label>
-              Notas
-              <textarea
-                name="descripcion"
-                required
-                maxLength={1000}
-                placeholder="Cliente confirma…"
-              />
-            </label>
-            <button disabled={bloqueado || actual.estado !== 'EN_DIAGNOSTICO'}>
-              Registrar aprobación
-            </button>
-            <p>Decisión actual: {actual.decision || 'Pendiente'}</p>
-          </form>
-        </section>
+        <CotizacionesRecepcion actual={actual} manejarOperacion={manejarOperacion} />
       ) : (
-        <section className="columnas">
-          <article>
-            <h2>Resumen de la orden</h2>
-            <dl>
-              <dt>Cliente</dt>
-              <dd>{actual.cliente}</dd>
-              <dt>Equipo</dt>
-              <dd>{actual.equipo}</dd>
-              <dt>Trabajo</dt>
-              <dd>{actual.reparacion}</dd>
-              <dt>Estado</dt>
-              <dd>{obtenerEstado(actual)}</dd>
-            </dl>
-            <button className="secundario" onClick={() => manejarAbrir(actual.id)}>
-              Ver bitácora
-            </button>
-          </article>
-          <form onSubmit={manejarPago} key={actual.id} aria-busy={bloqueado}>
-            <h2>Pago</h2>
-            <div className="columnas">
-              <label>
-                Total del servicio
-                <input readOnly value={MONEDA.format(actual.total || 0)} />
-              </label>
-              <label>
-                Pagos registrados
-                <input readOnly value={MONEDA.format(pagado / 100)} />
-              </label>
-            </div>
-            <div className="total">
-              Saldo a cobrar
-              <strong>{MONEDA.format(saldo)}</strong>
-            </div>
-            {pagoPendiente && (
-              <p role="status">
-                Hay un abono por confirmar. Usa el mismo monto y método para comprobarlo.
-              </p>
-            )}
-            <label>
-              Método de pago
-              <select name="metodo" defaultValue={pagoPendiente?.metodo || 'Efectivo'}>
-                <option>Efectivo</option>
-                <option>Tarjeta</option>
-                <option>Transferencia</option>
-              </select>
-            </label>
-            <label>
-              Monto recibido
-              <input
-                type="number"
-                min="0.01"
-                max={pagoPendiente ? undefined : saldo}
-                step="0.01"
-                name="monto"
-                defaultValue={pagoPendiente?.monto ?? ''}
-                required
-              />
-            </label>
-            <button
-              disabled={bloqueado || (!pagoPendiente && (actual.estado !== 'LISTO' || saldo === 0))}
-            >
-              {pagoPendiente ? 'Confirmar abono' : 'Registrar pago'}
-            </button>
-            <div className="separador" />
-            <label className="opcion">
-              <input
-                type="checkbox"
-                id="devolucion"
-                onChange={(evento) => {
-                  evento.currentTarget.setCustomValidity('');
-                  evento.currentTarget.form.dataset.esVerificado = evento.target.checked
-                    ? 'true'
-                    : '';
-                }}
-              />
-              Equipo y accesorios devueltos
-            </label>
-            <p>Confirma la devolución de equipo y accesorios antes de entregar.</p>
-            <button
-              type="button"
-              className="secundario"
-              disabled={bloqueado || actual.estado !== 'LISTO'}
-              onClick={(evento) => {
-                if (!evento.currentTarget.form.dataset.esVerificado) {
-                  evento.currentTarget.form
-                    .querySelector('#devolucion')
-                    .setCustomValidity('Confirma la devolución del equipo antes de entregar.');
-                  evento.currentTarget.form.querySelector('#devolucion').reportValidity();
-                  return;
-                }
-                manejarOperacion(rutaActual, {
-                  accion: 'estado',
-                  estado: 'ENTREGADO',
-                  equipoDevuelto: true,
-                });
-              }}
-            >
-              Entregar y cerrar orden
-            </button>
-          </form>
-        </section>
+        <EntregasRecepcion
+          actual={actual}
+          usuario={usuario}
+          manejarOperacion={manejarOperacion}
+          manejarAbrir={manejarAbrir}
+        />
       )}
     </>
   );
 }
-
-export default Recepcion;
